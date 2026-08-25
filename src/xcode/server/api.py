@@ -272,6 +272,13 @@ def _stats_payload(app: XcodeApp, project_root: Path) -> dict[str, object]:
 def _model_payload(app: XcodeApp) -> dict[str, object]:
     """当前模型信息 + 可用模型列表（优先网关 /models 发现）。"""
     info: dict[str, object] = dict(app.get_model_info())
+    transport = _profile_transport(app)
+    if transport == "custom":
+        # custom 网关不枚举模型：只提供当前模型 + 前端自定义输入
+        current = str(info.get("model", ""))
+        info["available"] = [current] if current else []
+        info["custom"] = True
+        return info
     discovered = _discover_models(app)
     if discovered:
         models = list(discovered)
@@ -288,6 +295,13 @@ def _model_payload(app: XcodeApp) -> dict[str, object]:
     except Exception:  # noqa: BLE001
         info["available"] = [str(info.get("model", ""))]
     return info
+
+
+def _profile_transport(app: XcodeApp) -> str:
+    """读取 main profile 配置的 transport（而非 provider 实例标签）。"""
+    profiles = getattr(app, "_model_profiles", None) or {}
+    main = profiles.get("main")
+    return str(getattr(main, "transport", "") or "") if main is not None else ""
 
 
 def _discover_models(app: XcodeApp) -> list[str]:

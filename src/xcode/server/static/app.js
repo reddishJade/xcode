@@ -25,6 +25,10 @@
     workspaceNewPath: $("workspace-new-path"),
     workspaceNewCancel: $("workspace-new-cancel"),
     workspaceNewConfirm: $("workspace-new-confirm"),
+    modelModal: $("model-modal"),
+    modelCustomInput: $("model-custom-input"),
+    modelCustomCancel: $("model-custom-cancel"),
+    modelCustomConfirm: $("model-custom-confirm"),
     toast: $("toast"),
     statsUsage: $("stats-usage"),
     statsContext: $("stats-context"),
@@ -590,10 +594,9 @@
   }
   els.input.addEventListener("input", autoGrow);
 
-  els.modelSelect.addEventListener("change", async () => {
+  async function switchModel(next) {
     const previous = els.modelSelect.dataset.current || "";
-    const next = els.modelSelect.value;
-    if (!next || next === previous) return;
+    if (!next || next === previous || next === "__custom__") return;
     try {
       const res = await fetch("/api/model", {
         method: "POST",
@@ -614,6 +617,32 @@
       toast("切换模型失败");
       els.modelSelect.value = previous;
     }
+  }
+
+  els.modelSelect.addEventListener("change", () => {
+    const next = els.modelSelect.value;
+    if (next === "__custom__") {
+      els.modelModal.hidden = false;
+      els.modelCustomInput.value = "";
+      els.modelCustomInput.focus();
+      return;
+    }
+    switchModel(next);
+  });
+
+  els.modelCustomCancel.addEventListener("click", () => {
+    els.modelModal.hidden = true;
+    els.modelSelect.value = els.modelSelect.dataset.current || "";
+  });
+
+  els.modelCustomConfirm.addEventListener("click", () => {
+    const name = els.modelCustomInput.value.trim();
+    els.modelModal.hidden = true;
+    if (name) switchModel(name);
+  });
+
+  els.modelCustomInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") els.modelCustomConfirm.click();
   });
 
   els.modes.addEventListener("click", (e) => {
@@ -962,6 +991,12 @@
       opt.textContent = m;
       if (m === current) opt.selected = true;
       els.modelSelect.appendChild(opt);
+    }
+    if (info.custom) {
+      const custom = document.createElement("option");
+      custom.value = "__custom__";
+      custom.textContent = "＋ 自定义模型…";
+      els.modelSelect.appendChild(custom);
     }
     els.modelSelect.dataset.current = current;
     els.modelSelect.title =

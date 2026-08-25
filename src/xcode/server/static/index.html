@@ -44,7 +44,6 @@
           <select id="workspace-select" class="workspace-select" title="切换工作区"></select>
           <button id="workspace-add" class="workspace-add" title="新建工作区">＋</button>
         </div>
-        <p class="workspace-current" id="workspace-current"></p>
       </div>
       <ul class="session-list" id="session-list"></ul>
     </aside>
@@ -126,6 +125,27 @@
       <footer class="modal__foot">
         <button class="btn btn--ghost" id="workspace-new-cancel">取消</button>
         <button class="btn" id="workspace-new-confirm">切换</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="model-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">
+      <header class="modal__head">
+        <span class="modal__eyebrow">模型</span>
+        <h2 class="modal__title" id="model-modal-title">自定义模型</h2>
+      </header>
+      <div class="modal__body">
+        <input
+          id="model-custom-input"
+          class="workspace-new-path"
+          placeholder="模型名称，如 deepseek-v4-pro…"
+          spellcheck="false"
+        />
+      </div>
+      <footer class="modal__foot">
+        <button class="btn btn--ghost" id="model-custom-cancel">取消</button>
+        <button class="btn" id="model-custom-confirm">切换</button>
       </footer>
     </div>
   </div>
