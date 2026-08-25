@@ -32,6 +32,8 @@ PROVIDER_REGISTRY: dict[str, type] = {
     "chatglm_chat": ChatGLMProvider,
     "deepseek_chat": DeepSeekProvider,
     "mimo_chat": MiMoProvider,
+    # custom：任意 OpenAI 协议网关（自定义 base_url + api_key）
+    "custom": OpenAIChatProvider,
 }
 
 

@@ -27,6 +27,7 @@ ProviderTransport = Literal[
     "chatglm_chat",
     "deepseek_chat",
     "mimo_chat",
+    "custom",
 ]
 HookEventName = Literal[
     "pre_tool",
@@ -526,11 +527,13 @@ def _load_provider_transport(
             return "deepseek_chat"
         case "mimo_chat":
             return "mimo_chat"
+        case "custom":
+            return "custom"
         case _:
             raise ValueError(
                 f"Unsupported provider transport: {value!r}. "
                 "Supported transports: openai_chat, chatglm_chat, "
-                "deepseek_chat, mimo_chat"
+                "deepseek_chat, mimo_chat, custom"
             )
 
 
