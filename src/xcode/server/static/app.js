@@ -21,7 +21,6 @@
     newChat: $("new-chat"),
     workspaceSelect: $("workspace-select"),
     workspaceAdd: $("workspace-add"),
-    workspaceCurrent: $("workspace-current"),
     workspaceModal: $("workspace-modal"),
     workspaceNewPath: $("workspace-new-path"),
     workspaceNewCancel: $("workspace-new-cancel"),
@@ -48,6 +47,7 @@
   let pendingApprovalId = null;
   let toastTimer = null;
   let viewedSessionId = null; // 当前视图展示的会话；null 表示实时空视图
+  let currentWorkspace = ""; // 服务端当前工作区路径
 
   const steps = new Map(); // step -> {num, lamp, thinkingEl, thinkingText, assistantEl, toolsEl, buffer}
   let lastStepKey = 0;
@@ -643,13 +643,14 @@
       const res = await fetch("/api/workspaces");
       const data = await res.json();
       const current = data.current || "";
-      els.workspaceCurrent.textContent = "当前：" + current;
+      currentWorkspace = current;
       els.workspaceSelect.innerHTML = "";
       for (const path of data.recent || []) {
         const opt = document.createElement("option");
         opt.value = path;
-        const name = path.split(/[\/]/).pop() || path;
+        const name = path.split(/[\\/]/).pop() || path;
         opt.textContent = path === current ? "● " + name : name;
+        opt.title = path;
         if (path === current) opt.selected = true;
         els.workspaceSelect.appendChild(opt);
       }
@@ -686,8 +687,7 @@
 
   els.workspaceSelect.addEventListener("change", () => {
     const next = els.workspaceSelect.value;
-    const current = (els.workspaceCurrent.textContent || "").replace("当前：", "");
-    if (!next || next === current) return;
+    if (!next || next === currentWorkspace) return;
     switchWorkspace(next);
   });
 
