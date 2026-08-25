@@ -108,15 +108,9 @@ class WebRunHub:
             return
         if not text.strip():
             return
-        import time as _t
-
-        print(f"[hub] +{_t.time():.3f} pre-user_message", flush=True)
         self.broadcast({"type": "user_message", "text": text, "mode": mode})
-        print(f"[hub] +{_t.time():.3f} pre-run_started", flush=True)
         self.broadcast({"type": "run_started"})
-        print(f"[hub] +{_t.time():.3f} pre-task", flush=True)
         self._run_task = asyncio.create_task(self._run(text, mode))
-        print(f"[hub] +{_t.time():.3f} post-task", flush=True)
 
     def cancel(self) -> None:
         pending = self._pending
