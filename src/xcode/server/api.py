@@ -135,8 +135,29 @@ def create_app(
             return JSONResponse(
                 {"error": "当前回合运行中，请先停止再新建会话。"}, status_code=409
             )
+        return JSONResponse({"session_id": new_id})
+
+    @server.post("/api/sessions/resume")
+    async def resume_session_endpoint(payload: dict) -> JSONResponse:
+        session_id = str(payload.get("id", "") or "")
+        if not session_id:
+            return JSONResponse({"error": "session id 不能为空"}, status_code=400)
+        loop = asyncio.get_running_loop()
+        try:
+            resumed_id = await loop.run_in_executor(
+                None, lambda: hub.resume_session(session_id)
+            )
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        if resumed_id is None:
+            return JSONResponse(
+                {"error": "当前回合运行中，请先停止再恢复会话。"}, status_code=409
+            )
         return JSONResponse(
-            {"session_id": new_id}
+            {
+                "session_id": resumed_id,
+                "info": _info_payload(hub.app, server.state.project_root),
+            }
         )
 
     @server.get("/api/sessions/{session_id}")

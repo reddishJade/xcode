@@ -209,6 +209,29 @@ class WebRunHub:
         self.broadcast({"type": "session_reset", "session_id": new_id})
         return new_id
 
+    def resume_session(self, session_id: str) -> str | None:
+        """切换到历史会话并恢复 agent 状态；运行中拒绝。
+
+        返回 None 表示正在运行；抛出 KeyError 表示会话不存在。
+        """
+        if self.is_running:
+            return None
+        store = self._app.session_store
+        try:
+            view = store.find_by_id(session_id)
+        except Exception:  # noqa: BLE001 - 索引损坏时按未知处理
+            view = None
+        if view is None:
+            raise KeyError(f"session not found: {session_id}")
+        store.resume(view.path)
+        self._app.restore_session()
+        agent = getattr(self._app, "agent", None)
+        if agent is not None:
+            agent.session_id = store.session_id
+        resumed_id = store.session_id
+        self.broadcast({"type": "session_switched", "session_id": resumed_id})
+        return resumed_id
+
     # ── 审批桥 ──
 
     def _approval_callback(self, request: ApprovalRequest) -> HITLResult:

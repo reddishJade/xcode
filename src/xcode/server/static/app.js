@@ -43,6 +43,7 @@
   let reconnectTimer = null;
   let pendingApprovalId = null;
   let toastTimer = null;
+  let viewedSessionId = null; // 当前视图展示的会话；null 表示实时空视图
 
   const steps = new Map(); // step -> {num, lamp, thinkingEl, thinkingText, assistantEl, toolsEl, buffer}
   let lastStepKey = 0;
@@ -521,6 +522,12 @@
         refreshInfo();
         refreshSessions();
         break;
+      case "session_switched":
+        resetView(false);
+        refreshInfo();
+        refreshSessions();
+        loadSession(msg.session_id || "", "live");
+        break;
       case "workspace_switched":
         resetView(true);
         refreshInfo();
@@ -543,9 +550,17 @@
 
   /* ── 提交 ── */
 
-  function submit() {
+  async function submit() {
     const text = els.input.value.trim();
     if (!text || !connected || running) return;
+    // 视图停留在历史会话时，先恢复该会话再提交（即“继续对话”）
+    if (viewedSessionId) {
+      const resumed = await tryResumeSession(viewedSessionId);
+      if (!resumed) {
+        toast("未能恢复该会话，已提交到当前实时会话");
+      }
+    }
+    if (running) return; // 恢复期间可能被其他端的回合占用
     els.input.value = "";
     autoGrow();
     send({ type: "submit", text, mode });
@@ -692,6 +707,7 @@
     lastStepKey = 0;
     els.stream.innerHTML = "";
     hideApproval();
+    viewedSessionId = null;
     if (showEmpty) renderEmpty();
     els.input.focus();
   }
@@ -737,6 +753,7 @@
 
     for (const item of items) {
       const li2 = document.createElement("li");
+      li2.className = "session-row";
       const btn = document.createElement("button");
       btn.className =
         "session-item" + (item.id === data.current ? " is-current" : "");
@@ -749,40 +766,81 @@
         item.id + " · " + (item.updated_at || "").slice(0, 16).replace("T", " ");
       btn.append(title, meta);
       btn.addEventListener("click", () => loadSession(item.id));
-      li2.appendChild(btn);
+      const resumeBtn = document.createElement("button");
+      resumeBtn.className = "session-item__continue";
+      resumeBtn.title = "恢复该会话并继续对话";
+      resumeBtn.textContent = "继续";
+      resumeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        resumeSession(item.id);
+      });
+      li2.append(btn, resumeBtn);
       els.sessionList.appendChild(li2);
     }
   }
 
-  async function loadSession(sessionId) {
+  async function tryResumeSession(sessionId) {
+    try {
+      const res = await fetch("/api/sessions/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: sessionId }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        toast(data.error);
+        return false;
+      }
+      return true;
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  async function resumeSession(sessionId) {
+    const ok = await tryResumeSession(sessionId);
+    if (!ok) {
+      resetView(true);
+      return;
+    }
+    await loadSession(sessionId, "live");
+    toast("已恢复会话，可以继续对话");
+  }
+
+  async function loadSession(sessionId, mode) {
     try {
       const res = await fetch("/api/sessions/" + sessionId);
       const data = await res.json();
       if (data.error) return toast(data.error);
       resetView(false);
-      renderTranscript(data);
-      toast("已加载会话 " + sessionId);
+      renderTranscript(data, { live: mode === "live" });
+      if (mode !== "live") toast("已加载会话 " + sessionId);
     } catch (_err) {
       toast("加载会话失败");
     }
   }
 
-  function renderTranscript(data) {
+  function renderTranscript(data, opts) {
+    const live = Boolean(opts && opts.live);
+    viewedSessionId = data.id;
     const banner = document.createElement("div");
     banner.className = "system-note";
     banner.innerHTML =
-      '<span class="system-note__tag">历史</span><span>会话 ' +
+      '<span class="system-note__tag">' +
+      (live ? "已恢复" : "历史") +
+      "</span><span>会话 " +
       esc(data.id) +
       " · " +
       esc(data.title || "") +
-      " · 只读回放，不影响实时会话</span>";
+      (live ? " · 可继续对话" : " · 只读回放，不影响实时会话") +
+      "</span>";
     const backBtn = document.createElement("button");
     backBtn.className = "btn btn--ghost";
     backBtn.style.cssText = "margin:2px 0 12px 78px;";
-    backBtn.textContent = "← 返回实时会话";
+    backBtn.textContent = live ? "清空视图" : "← 返回实时会话";
     backBtn.addEventListener("click", () => {
       resetView(true);
-      toast("已回到实时会话");
+      toast(live ? "已清空视图" : "已回到实时会话");
     });
     els.stream.append(banner, backBtn);
 

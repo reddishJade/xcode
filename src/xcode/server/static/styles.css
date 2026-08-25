@@ -218,6 +218,8 @@ button {
 
 .session-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 
+.session-row { display: flex; gap: 6px; align-items: center; }
+
 .session-item {
   text-align: left;
   padding: 8px 10px;
@@ -225,7 +227,20 @@ button {
   border-radius: var(--radius);
   display: block;
   width: 100%;
+  min-width: 0;
 }
+
+.session-item__continue {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.session-item__continue:hover { color: var(--amber-strong); border-color: var(--amber); }
 
 .session-item:hover { background: var(--panel-2); border-color: var(--border); }
 
