@@ -10,7 +10,10 @@
     branch: $("branch"),
     modelBtn: $("model-btn"),
     modelMenu: $("model-menu"),
-    effortSelect: $("effort-select"),
+    effortBtn: $("effort-btn"),
+    effortMenu: $("effort-menu"),
+    workspaceBtn: $("workspace-btn"),
+    workspaceMenu: $("workspace-menu"),
     sessionId: $("session-id"),
     modes: $("modes"),
     stream: $("stream"),
@@ -21,8 +24,7 @@
     scrollBottom: $("scroll-bottom"),
     sessionList: $("session-list"),
     newChat: $("new-chat"),
-    workspaceSelect: $("workspace-select"),
-    workspaceAdd: $("workspace-add"),
+
     workspaceModal: $("workspace-modal"),
     workspaceNewPath: $("workspace-new-path"),
     workspaceNewCancel: $("workspace-new-cancel"),
@@ -598,7 +600,7 @@
 
   async function switchModel(next, effort) {
     const previous = els.modelBtn.dataset.current || "";
-    const previousEffort = els.effortSelect.dataset.current || "";
+    const previousEffort = els.effortBtn.dataset.current || "";
     if (!next || next === "__custom__") return;
     if (next === previous && (!effort || effort === previousEffort)) return;
     const body = { model: next };
@@ -620,33 +622,41 @@
       refreshStats();
     } catch (_err) {
       toast("切换失败");
-      els.effortSelect.value = previousEffort;
     }
   }
 
-  function closeModelMenu() {
-    els.modelMenu.hidden = true;
+  function openDrop(btn, menu) {
+    const rect = btn.getBoundingClientRect();
+    menu.style.left = Math.max(8, rect.left) + "px";
+    menu.style.top = rect.bottom + 6 + "px";
+    menu.hidden = false;
   }
 
-  function openModelMenu() {
-    const rect = els.modelBtn.getBoundingClientRect();
-    els.modelMenu.style.left = Math.max(8, rect.left) + "px";
-    els.modelMenu.style.top = rect.bottom + 6 + "px";
-    els.modelMenu.hidden = false;
+  function closeDrops() {
+    for (const menu of [els.modelMenu, els.effortMenu, els.workspaceMenu]) {
+      menu.hidden = true;
+    }
+  }
+
+  function toggleDrop(btn, menu) {
+    const wasOpen = !menu.hidden;
+    closeDrops();
+    if (!wasOpen) openDrop(btn, menu);
   }
 
   els.modelBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (els.modelMenu.hidden) openModelMenu();
-    else closeModelMenu();
+    toggleDrop(els.modelBtn, els.modelMenu);
+  });
+
+  els.effortBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleDrop(els.effortBtn, els.effortMenu);
   });
 
   document.addEventListener("click", (e) => {
-    if (!els.modelMenu.hidden && !els.modelMenu.contains(e.target)) closeModelMenu();
-  });
-
-  els.effortSelect.addEventListener("change", () => {
-    switchModel(els.modelBtn.dataset.current || "", els.effortSelect.value);
+    if (e.target.closest(".drop")) return;
+    closeDrops();
   });
 
   els.modelCustomCancel.addEventListener("click", () => {
@@ -691,16 +701,33 @@
       const data = await res.json();
       const current = data.current || "";
       currentWorkspace = current;
-      els.workspaceSelect.innerHTML = "";
+      const curName = current.split(/[\\/]/).pop() || current;
+      els.workspaceBtn.textContent = (current ? "● " + curName : "—") + " ▾";
+      els.workspaceBtn.title = current;
+      els.workspaceMenu.innerHTML = "";
       for (const path of data.recent || []) {
-        const opt = document.createElement("option");
-        opt.value = path;
-        const name = path.split(/[\\/]/).pop() || path;
-        opt.textContent = path === current ? "● " + name : name;
-        opt.title = path;
-        if (path === current) opt.selected = true;
-        els.workspaceSelect.appendChild(opt);
+        const item = document.createElement("button");
+        const shortName = path.split(/[\\/]/).pop() || path;
+        item.className = "drop-menu__item" + (path === current ? " is-current" : "");
+        item.textContent = (path === current ? "● " : "") + shortName;
+        item.title = path;
+        item.addEventListener("click", () => {
+          closeDrops();
+          if (path !== currentWorkspace) switchWorkspace(path);
+        });
+        els.workspaceMenu.appendChild(item);
       }
+      const plus = document.createElement("button");
+      plus.className = "drop-menu__plus";
+      plus.textContent = "＋";
+      plus.title = "新建工作区";
+      plus.addEventListener("click", () => {
+        closeDrops();
+        els.workspaceModal.hidden = false;
+        els.workspaceNewPath.value = "";
+        els.workspaceNewPath.focus();
+      });
+      els.workspaceMenu.appendChild(plus);
     } catch (_err) {
       /* 忽略 */
     }
@@ -732,16 +759,9 @@
     }
   }
 
-  els.workspaceSelect.addEventListener("change", () => {
-    const next = els.workspaceSelect.value;
-    if (!next || next === currentWorkspace) return;
-    switchWorkspace(next);
-  });
-
-  els.workspaceAdd.addEventListener("click", () => {
-    els.workspaceModal.hidden = false;
-    els.workspaceNewPath.value = "";
-    els.workspaceNewPath.focus();
+  els.workspaceBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleDrop(els.workspaceBtn, els.workspaceMenu);
   });
 
   els.workspaceNewCancel.addEventListener("click", () => {
@@ -1007,21 +1027,21 @@
     els.modelMenu.innerHTML = "";
     for (const m of models) {
       const item = document.createElement("button");
-      item.className = "model-menu__item" + (m === current ? " is-current" : "");
+      item.className = "drop-menu__item" + (m === current ? " is-current" : "");
       item.textContent = m;
       item.addEventListener("click", () => {
-        closeModelMenu();
+        closeDrops();
         switchModel(m);
       });
       els.modelMenu.appendChild(item);
     }
     if (info.custom) {
       const plus = document.createElement("button");
-      plus.className = "model-menu__plus";
+      plus.className = "drop-menu__plus";
       plus.textContent = "＋";
       plus.title = "自定义模型";
       plus.addEventListener("click", () => {
-        closeModelMenu();
+        closeDrops();
         els.modelModal.hidden = false;
         els.modelCustomInput.value = "";
         els.modelCustomInput.focus();
@@ -1030,17 +1050,20 @@
     }
     const effortOptions = info.effort_options || [];
     const effort = info.effort || "";
-    els.effortSelect.hidden = effortOptions.length === 0;
-    els.effortSelect.innerHTML = "";
+    els.effortBtn.hidden = effortOptions.length === 0;
+    els.effortBtn.textContent = "effort · " + effort + " ▾";
+    els.effortBtn.dataset.current = effort;
+    els.effortMenu.innerHTML = "";
     for (const level of effortOptions) {
-      const opt = document.createElement("option");
-      opt.value = level;
-      opt.textContent = level;
-      if (level === effort) opt.selected = true;
-      els.effortSelect.appendChild(opt);
+      const item = document.createElement("button");
+      item.className = "drop-menu__item" + (level === effort ? " is-current" : "");
+      item.textContent = level;
+      item.addEventListener("click", () => {
+        closeDrops();
+        switchModel(els.modelBtn.dataset.current || "", level);
+      });
+      els.effortMenu.appendChild(item);
     }
-    els.effortSelect.dataset.current = effort;
-    if (effortOptions.length > 0) els.effortSelect.title = "推理 effort · " + effort;
   }
 
   /* ── 启动 ── */

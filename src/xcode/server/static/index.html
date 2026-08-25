@@ -23,11 +23,14 @@
     <div class="topbar__meta">
       <span class="meta" id="project-path">—</span>
       <span class="meta meta--muted" id="branch"></span>
-      <div class="model-drop">
-        <button class="model-btn" id="model-btn" title="切换模型">— ▾</button>
-        <div class="model-menu" id="model-menu" hidden></div>
+      <div class="drop">
+        <button class="drop-btn" id="model-btn" title="切换模型">— ▾</button>
+        <div class="drop-menu" id="model-menu" hidden></div>
       </div>
-      <select class="effort-select" id="effort-select" title="推理 effort" hidden></select>
+      <div class="drop">
+        <button class="drop-btn drop-btn--muted" id="effort-btn" title="推理 effort">effort · — ▾</button>
+        <div class="drop-menu" id="effort-menu" hidden></div>
+      </div>
       <span class="meta meta--muted" id="session-id"></span>
     </div>
     <nav class="modes" id="modes" aria-label="执行模式">
@@ -44,9 +47,9 @@
       </div>
       <div class="workspace-box">
         <p class="sidebar__label">工作区</p>
-        <div class="workspace-row">
-          <select id="workspace-select" class="workspace-select" title="切换工作区"></select>
-          <button id="workspace-add" class="workspace-add" title="新建工作区">＋</button>
+        <div class="drop">
+          <button class="drop-btn drop-btn--full" id="workspace-btn" title="切换工作区">— ▾</button>
+          <div class="drop-menu" id="workspace-menu" hidden></div>
         </div>
       </div>
       <ul class="session-list" id="session-list"></ul>

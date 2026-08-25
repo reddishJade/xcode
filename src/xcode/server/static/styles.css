@@ -136,7 +136,9 @@ button {
 
 .meta--muted { color: var(--text-3); }
 
-.model-btn {
+.drop { position: relative; }
+
+.drop-btn {
   font: inherit;
   font-size: 12px;
   color: var(--text-2);
@@ -150,13 +152,15 @@ button {
   white-space: nowrap;
 }
 
-.model-btn:hover { border-color: var(--border-strong); color: var(--cream); }
+.drop-btn:hover { border-color: var(--border-strong); color: var(--cream); }
 
-.model-btn:focus { border-color: var(--amber); outline: none; }
+.drop-btn:focus { border-color: var(--amber); outline: none; }
 
-.model-drop { position: relative; }
+.drop-btn--muted { color: var(--text-3); font-size: 11px; }
 
-.model-menu {
+.drop-btn--full { width: 100%; max-width: none; display: block; text-align: left; }
+
+.drop-menu {
   position: fixed;
   z-index: 80;
   min-width: 230px;
@@ -169,7 +173,7 @@ button {
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
 }
 
-.model-menu__item {
+.drop-menu__item {
   display: block;
   width: 100%;
   text-align: left;
@@ -179,11 +183,11 @@ button {
   padding: 6px 10px;
 }
 
-.model-menu__item:hover { background: var(--panel-3); color: var(--cream); }
+.drop-menu__item:hover { background: var(--panel-3); color: var(--cream); }
 
-.model-menu__item.is-current { color: var(--amber-strong); }
+.drop-menu__item.is-current { color: var(--amber-strong); }
 
-.model-menu__plus {
+.drop-menu__plus {
   display: block;
   width: 100%;
   text-align: center;
@@ -194,19 +198,7 @@ button {
   padding: 6px 0 2px;
 }
 
-.model-menu__plus:hover { color: var(--amber-strong); }
-
-.effort-select {
-  font: inherit;
-  font-size: 11px;
-  color: var(--text-3);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 3px 6px;
-}
-
-.effort-select:hover { color: var(--cream); border-color: var(--border-strong); }
+.drop-menu__plus:hover { color: var(--amber-strong); }
 
 .modes { display: flex; gap: 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px; }
 
@@ -264,36 +256,6 @@ button {
 
 .workspace-box { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 
-.workspace-row { display: flex; gap: 6px; align-items: center; }
-
-.workspace-select {
-  font: inherit;
-  font-size: 11.5px;
-  color: var(--text-2);
-  background: var(--ink);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 8px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.workspace-select:focus { border-color: var(--amber); outline: none; }
-
-.workspace-add {
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-2);
-  font-size: 15px;
-  line-height: 1;
-}
-
-.workspace-add:hover { color: var(--amber-strong); border-color: var(--amber); }
 
 
 .workspace-new-path {
