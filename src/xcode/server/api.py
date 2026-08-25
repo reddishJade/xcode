@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from .runner import WebRunHub
 
 STATIC_DIR = Path(__file__).parent / "static"
 _SESSION_TRANSCRIPT_LIMIT = 500
+_MODEL_CACHE_TTL_SECONDS = 300.0
+_model_cache: dict[str, tuple[float, list[str]]] = {}
 
 
 AppFactory = Callable[[Path], XcodeApp]
@@ -60,18 +63,26 @@ def create_app(
 
     @server.get("/api/model")
     async def model_info() -> JSONResponse:
-        return JSONResponse(_model_payload(hub.app))
+        loop = asyncio.get_running_loop()
+        payload = await loop.run_in_executor(None, lambda: _model_payload(hub.app))
+        return JSONResponse(payload)
 
     @server.post("/api/model")
     async def set_model_endpoint(payload: dict) -> JSONResponse:
         model = str(payload.get("model", "") or "")
         if not model:
             return JSONResponse({"error": "model 不能为空"}, status_code=400)
-        try:
+
+        def _apply() -> dict[str, object]:
             hub.app.set_model(model=model, profile="main")
+            return _model_payload(hub.app)
+
+        loop = asyncio.get_running_loop()
+        try:
+            result = await loop.run_in_executor(None, _apply)
         except Exception as exc:  # noqa: BLE001 - 返回给前端展示
             return JSONResponse({"error": f"切换模型失败: {exc}"}, status_code=400)
-        return JSONResponse(_model_payload(hub.app))
+        return JSONResponse(result)
 
     @server.get("/api/workspaces")
     async def workspaces() -> JSONResponse:
@@ -259,8 +270,17 @@ def _stats_payload(app: XcodeApp, project_root: Path) -> dict[str, object]:
 
 
 def _model_payload(app: XcodeApp) -> dict[str, object]:
-    """当前模型信息 + 可用模型列表。"""
+    """当前模型信息 + 可用模型列表（优先网关 /models 发现）。"""
     info: dict[str, object] = dict(app.get_model_info())
+    discovered = _discover_models(app)
+    if discovered:
+        models = list(discovered)
+        current = str(info.get("model", ""))
+        if current and current not in models:
+            models.insert(0, current)
+        info["available"] = models
+        return info
+    # 发现失败时回退到注册表预设 + 当前模型
     try:
         from xcode.cli.repl import current_model_options
 
@@ -268,6 +288,30 @@ def _model_payload(app: XcodeApp) -> dict[str, object]:
     except Exception:  # noqa: BLE001
         info["available"] = [str(info.get("model", ""))]
     return info
+
+
+def _discover_models(app: XcodeApp) -> list[str]:
+    """调用网关 /models 发现真实可用的模型；失败返回空列表。"""
+    try:
+        base_url = str(app.get_model_info().get("base_url") or "")
+        if not base_url:
+            return []
+        cached = _model_cache.get(base_url)
+        if cached is not None and time.monotonic() - cached[0] < _MODEL_CACHE_TTL_SECONDS:
+            return cached[1]
+        profiles = getattr(app, "_model_profiles", None) or {}
+        main = profiles.get("main")
+        api_key = getattr(main, "api_key", None) if main is not None else None
+        if not api_key:
+            return []
+        from openai import OpenAI
+
+        client = OpenAI(base_url=base_url, api_key=api_key, timeout=10.0)
+        ids = sorted(item.id for item in client.models.list().data)
+        _model_cache[base_url] = (time.monotonic(), ids)
+        return ids
+    except Exception:  # noqa: BLE001 - 发现失败时回退
+        return []
 
 
 def _info_payload(app: XcodeApp, project_root: Path) -> dict[str, object]:
