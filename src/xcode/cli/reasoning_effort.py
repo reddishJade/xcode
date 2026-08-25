@@ -15,10 +15,6 @@ EFFORT_COMMAND_LEVELS: tuple[str, ...] = (
 
 OPENAI_CHAT_EFFORT_LEVELS: tuple[str, ...] = EFFORT_COMMAND_LEVELS
 DEEPSEEK_CHAT_EFFORT_LEVELS: tuple[str, ...] = ("off", "high", "max")
-# custom 网关协议不定：提供全部已知档位，由 provider 透传
-CUSTOM_CHAT_EFFORT_LEVELS: tuple[str, ...] = tuple(
-    dict.fromkeys(OPENAI_CHAT_EFFORT_LEVELS + DEEPSEEK_CHAT_EFFORT_LEVELS)
-)
 
 SUPPORTED_EFFORT_TRANSPORTS: frozenset[str] = frozenset(
     {"openai_chat", "deepseek_chat", "custom"}
@@ -34,9 +30,9 @@ def reasoning_effort_levels_for_transport(transport: str) -> tuple[str, ...]:
     """返回指定 transport 可用的 effort 选项。"""
     if transport == "deepseek_chat":
         return DEEPSEEK_CHAT_EFFORT_LEVELS
-    if transport == "custom":
-        return CUSTOM_CHAT_EFFORT_LEVELS
-    if transport == "openai_chat":
+    # 非 openai 协议（deepseek/custom）的档位映射由 provider 或网关处理，
+    # 界面统一展示 openai 档位
+    if transport in {"openai_chat", "deepseek_chat", "custom"}:
         return OPENAI_CHAT_EFFORT_LEVELS
     return ()
 

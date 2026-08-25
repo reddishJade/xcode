@@ -1051,7 +1051,7 @@
     const effortOptions = info.effort_options || [];
     const effort = info.effort || "";
     els.effortBtn.hidden = effortOptions.length === 0;
-    els.effortBtn.textContent = "effort · " + effort + " ▾";
+    els.effortBtn.textContent = effort + " ▾";
     els.effortBtn.dataset.current = effort;
     els.effortMenu.innerHTML = "";
     for (const level of effortOptions) {
