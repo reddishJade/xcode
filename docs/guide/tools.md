@@ -1,78 +1,101 @@
-# 核心工具箱与并发调度
+# 工具与执行调度
 
-Xcode 内置了一套专为编程场景调优的工具集，并实现了**副作用感知的工具并发分区调度机制**。
+工具以 `ToolSpec` 注册，以 JSON Schema 描述输入，以 `AgentTool` 协议进入 Agent 循环。工具结果同时可以携带文本、结构化 metadata 和终端、差异、位置或子代理 render intent。
 
----
+## 1. 工具总览
 
-## 1. 内置核心工具概览
+| 工具 | 用途 |
+| --- | --- |
+| `read_file` | 读取文件、目录、图片和带行号的文本片段 |
+| `write_file` | 创建文件或执行整文件替换 |
+| `edit_file` | 对已有文本执行精确替换 |
+| `apply_patch` | 以结构化 patch 批量新增、修改、删除、移动文件 |
+| `glob_files` / `find_files` | 按 glob 或文件名发现文件 |
+| `grep_search` | 使用正则或 literal 搜索文本 |
+| `list_dir` | 列出目录内容 |
+| `bash` | 执行平台 Shell 命令 |
+| `question` | 向用户收集单选、多选或自由文本 |
+| `todowrite` | 替换当前 session 的结构化 todo 清单 |
+| `history` | 搜索当前 session 的完整账本并读取邻域 |
+| `search_memory` | 检索项目和用户长期记忆 |
+| `load_skill` | 加载技能正文或指定 reference |
+| `webfetch` / `websearch` | 获取外部网页和搜索结果 |
+| `subagent` | 创建独立 session-backed child agent |
+| `mcp__*` | 调用 MCP server 提供的工具 |
 
-| 工具名称 | 权限属性 | 功能说明 |
-|---|---|---|
-| `read_file` | 只读 / 并发安全 | 读取指定文件内容，支持行号范围切片 |
-| `write_file` | 写入 / 串行屏障 | 创建或覆盖写入文件内容 |
-| `edit_file` | 编辑 / 串行屏障 | 基于 SHA256 指纹匹配替换文件代码块（Read-before-edit） |
-| `apply_patch` | 编辑 / 串行屏障 | 应用标准 Unified Diff 格式的 Patch |
-| `glob_files` | 只读 / 并发安全 | 快速通过 Glob 模式搜索匹配的文件名 |
-| `grep_search` | 只读 / 并发安全 | 基于 ripgrep 极速进行代码文本与正则搜索 |
-| `list_dir` | 只读 / 并发安全 | 列出目录下的文件和子目录层级结构 |
-| `find_files` | 只读 / 并发安全 | 根据名称和文件类型递归搜索文件 |
-| `bash` | 命令 / 串行屏障 | 在沙箱或本地环境中执行 Shell 命令 |
-| `todowrite` | 会话 / 串行屏障 | 维护会话内的 Todo 待办事项列表 |
-| `search_memory`| 只读 / 并发安全 | 基于 BM25 检索项目与用户长期记忆 |
-| `subagent` | 委派 / 独立会话 | 启动独立的子代理执行复杂子任务 |
-| `websearch` | 网络 / 并发安全 | 通过网络搜索引擎检索外部最新文档 |
-| `webfetch` | 网络 / 并发安全 | 抓取网页并转换为 Clean Markdown 格式 |
-| `question` | 交互 / 暂停等待 | 向用户发起交互式单选/多选确认 |
-| `history` | 只读 / 并发安全 | 检索当前会话的历史原始消息邻域 |
+## 2. 调度模型
 
----
+Agent 默认使用并行工具模式，`tool_workers` 默认 4。工具可以声明 `sequential` 或 `parallel` 执行模式；当前内置 `ToolSpecAdapter` 默认使用并行调度，写入同一文件时由 file mutation queue 按规范化路径加锁。
 
-## 2. 副作用感知与工具并发分区调度
+调度步骤：
 
-当大模型单次返回多个工具调用指令时（例如同时读取 5 个依赖文件），Xcode 的调度器会根据工具的副作用属性进行智能分区：
+1. 根据模型返回的调用列表分组。
+2. 逐调用发出 `tool_execution_start`。
+3. 按 JSON Schema 校验参数。
+4. 经过 ToolGate 和 PermissionEngine。
+5. 启动 handler，接收 progress update。
+6. 对超时、取消和异常生成 ToolResult。
+7. 按原始 tool call 顺序整理并发结果。
+8. 发出 `tool_execution_end`，把结果写入当前上下文。
 
-```
-Model Tool Calls Batch
-  ├── [read_file A] ──┐
-  ├── [read_file B] ──┼─► [Concurrent Worker Pool] ──► 并行执行，延迟降低 60%+
-  ├── [grep_search] ──┘
-  │
-  ├── [edit_file C] ────► [Serial Execution Barrier] ──► 串行保证写入原子性
-  └── [bash pytest] ────► [Serial Execution Barrier] ──► 串行验证结果
-```
+## 3. 文件读取与编辑
 
-* **并行调度**：只读且并发安全的工具会被分发至内部 Worker 池并行执行，大幅缩短多文件探索与上下文收集阶段的耗时。
-* **串行屏障**：涉及文件写入或 Shell 命令的工具保持严格串行执行，确保前序步骤的副作用对后序步骤完全可见。
-
----
-
-## 3. Read-before-edit SHA256 指纹校验
-
-为了防止大模型基于过时的文件内容进行盲目编辑或并发导致代码被破坏，`edit_file` 强制执行指纹校验：
-
-1. Agent 在编辑文件前必须先通过 `read_file` 读取文件；
-2. 调度器在内存中记录该文件读取时的 SHA256 校验和；
-3. 执行 `edit_file` 时，Xcode 会重新校验磁盘文件的当前 SHA256；若文件在读取后被用户或外部进程修改，则直接拒绝写入（Fail-safe），防止覆盖最新代码。
-
----
-
-## 4. 会话 Todo 清单管理 (todowrite)
-
-Agent 通过 `todowrite` 维护结构化的任务分解：
+### `read_file`
 
 ```json
-{
-  "todos": [
-    {"id": "1", "content": "设计数据模型", "status": "completed", "priority": "high"},
-    {"id": "2", "content": "编写数据库迁移脚本", "status": "in_progress", "priority": "high"},
-    {"id": "3", "content": "添加单元测试", "status": "pending", "priority": "medium"}
-  ]
-}
+{"path": "src/xcode/main.py", "offset": 1, "limit": 80}
 ```
 
-* **状态持久化**：Todo 列表会自动渲染至 TUI 侧边栏与动态上下文中，即便发生上下文压缩也不会丢失当前任务进度。
+支持文件与目录。文本结果带 `<path>`、`<type>`、`<content>`、1-based 行号和继续读取提示；默认最多 2000 行、50 KB，单行最多 2000 字符。二进制文件返回明确错误，图片按 magic bytes 检测并缩放到最大边 2000 像素，数据保存在 metadata。
 
----
+### `write_file`
 
-← **上一篇**：[会话账本与分层压缩 (sessions.md)](sessions.md) | **下一篇**：[权限、安全与 Linux 沙箱 (security.md)](security.md) →
+```json
+{"path": "notes/plan.md", "content": "# Plan\n..."}
+```
 
+适合新文件和有意的整文件替换。返回 unified diff，默认写入上限 1 MB；已有文件的 BOM 和 UTF-8 内容得到保留，Python 文件写入后尝试 Ruff format。
+
+### `edit_file`
+
+```json
+{"path": "src/app.py", "old_text": "old", "new_text": "new"}
+```
+
+`old_text` 需要精确匹配空白和换行。默认要求唯一匹配；`replace_all=true` 只在单个编辑项时启用。编辑前会保留原始 BOM 和换行风格，并返回差异与首个变化行。
+
+### `apply_patch`
+
+使用 Xcode 结构化格式：
+
+```text
+*** Begin Patch
+*** Update File: src/app.py
+@@
+-old line
++new line
+*** End Patch
+```
+
+支持 `*** Add File`、`*** Update File`、`*** Delete File`、`*** Move to`。系统先解析所有 hunk、路径和上下文，再创建变更计划；上下文无法匹配时返回 verification error。
+
+## 4. 搜索
+
+ripgrep 可用时优先使用，Python fallback 提供同一工具接口。搜索层处理 `.gitignore`、隐藏目录、`.git`、`.venv`、`__pycache__`、环境文件和二进制路径；结果具有数量、长行和总字节限制。
+
+- `glob_files`：模式匹配当前目录下的项目文件。
+- `find_files`：basename 模式自动递归。
+- `list_dir`：按名称列出目录，目录带 `/` 后缀。
+- `grep_search`：支持 regex、literal、ignore_case、glob 和 context。
+
+## 5. Bash 与输出
+
+`bash` 的输入包含 `command`、`workdir` 和 `timeout_ms`。命令自身默认超时 30 秒，最大 300 秒；Agent 等待工具结果的默认上限为 120 秒。进程以 argv 启动，stdout/stderr 独立排空，POSIX 使用进程组，Windows 使用隐藏窗口。
+
+OutputAccumulator 保留行数、字节数和最近预览。输出超过限制时写入临时 `.log`，模型收到尾部摘要和完整输出路径；`on_progress` 将实时输出转为 tool update。Shell 的安全分类和 OS sandbox 位于 [security.md](security.md)。
+
+## 6. 结果与上下文
+
+工具结果的 `is_error` 驱动 watchdog 和前端状态。文件工具可以提供 `LocationRenderIntent`，写入和 patch 可以提供 `DiffRenderIntent`，Shell 提供 `TerminalRenderIntent`，子代理提供 `SubagentRenderIntent`。
+
+工具调用和结果进入 session surface；大型结果在 provider 请求前按 request hygiene 和 layered compaction 规则生成较小投影。原始 session 账本保持可恢复结构。

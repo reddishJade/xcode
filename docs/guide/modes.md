@@ -1,80 +1,63 @@
-# 执行模式：Plan / Build / Act
+# 执行模式：Plan、Build、Act
 
-Xcode 提供了三个内建的执行模式（Execution Modes）。执行模式定义了 Agent 在当前回合中的**工具可见性**、**写权限限制**以及**审批路由策略**。
+执行模式同时控制工具可见性、默认规则、Shell 未决效果处理和审批路由。模式状态进入 session run state，恢复会话时继续使用记录中的模式。
 
-用户可以在会话进行中随时无缝切换模式，且不会丢失已有的上下文与消息历史。
+## 1. 模式对照
 
----
+| 模式 | 工具可见性 | 默认动作 | 适用场景 |
+| --- | --- | --- | --- |
+| Plan | 只读探索、搜索、Web、question；显式技能可激活 | 规则覆盖外的动作 deny | 研究架构、制定方案 |
+| Build | 全部已注册工具 | 项目结构化写入 allow；Shell 与未匹配动作 ask | 自动完成编码和验证 |
+| Act | 全部已注册工具 | 只读 allow；写入与 Shell ask | 逐项确认副作用 |
 
-## 1. 三种内置模式概览
+## 2. Plan
 
-```
-  ┌────────────────────────────────────────────────────────┐
-  │                       /plan                            │  只读调研与规划
-  │  仅允许只读工具与 .xcode/plans/*.md 写入，无副作用       │
-  └──────────────────────────┬─────────────────────────────┘
-                             │  方案确认后切换
-                             ▼
-  ┌────────────────────────────────────────────────────────┐
-  │                       /build                           │  自动执行与构建
-  │  允许项目内代码修改；Shell 命令由 Reviewer 自动语义审批 │
-  └──────────────────────────┬─────────────────────────────┘
-                             │  需每步人工确认时切换
-                             ▼
-  ┌────────────────────────────────────────────────────────┐
-  │                       /act                             │  人机协作执行
-  │  所有写文件与 Shell 命令严格请求用户人工审批 (HITL)     │
-  └────────────────────────────────────────────────────────┘
+```text
+/plan
+/plan 分析当前 provider 结构并给出修改方案
 ```
 
-### 1.1 Plan 模式（只读规划）
-* **目标**：在不修改任何项目代码的前提下，深入勘察代码库并制定实施方案。
-* **权限规则**：
-  * 只读工具（`read_file`, `glob_files`, `grep_search`, `list_dir`, `websearch` 等）允许；
-  * `write_file` / `edit_file` **仅允许**写入 `.xcode/plans/*.md` 规划文件；
-  * `bash` Shell 执行与业务代码写入一律被拒绝（`deny`），绝不产生误操作。
+Plan 可见 `read_file`、`glob_files`、`find_files`、`list_dir`、`grep_search`、`search_tools`、`webfetch`、`websearch` 和 `question`。`write_file`、`edit_file` 的默认允许目标是 `.xcode/plans/*.md`，`apply_patch`、bash 和其他写操作由模式 fallback 拒绝。
 
-### 1.2 Build 模式（自动构建）
-* **目标**：高效率自动化实现代码与运行验证，减少对用户的频繁打扰。
-* **权限规则**：
-  * 项目内的结构化文件读写（`read_file`, `write_file`, `edit_file`, `apply_patch`）直接放行；
-  * `bash` 命令和未匹配动作进入自动审批流程：由独立的轻量模型（`reviewer` profile）评估风险。如果是运行测试等常规操作则自动放行；如果是高风险或破坏性操作则安全拒绝。
+Plan investigation turn 默认上限为 8。达到上限后自动切换 Build，并向下一轮注入模式通知。
 
-### 1.3 Act 模式（人机协作）
-* **目标**：严谨把控每一步副作用，适合在生产环境或关键模块开发时使用。
-* **权限规则**：
-  * 只读工具直接放行；
-  * 任何文件写操作与 `bash` 命令均暂停并向用户弹出确认提示（Human-in-the-Loop）。
+## 3. Build
 
----
+```text
+/build
+```
 
-## 2. 模式切换与使用示例
+Build 保持全部工具可见：
 
-### 在终端中随时切换
-* 输入 `/plan`：进入只读规划模式；
-* 输入 `/build`：进入自动构建模式；
-* 输入 `/act`：进入逐步人工确认模式。
+- 项目内 `write_file`、`edit_file`、`apply_patch` 由默认规则直接允许。
+- 读取、搜索、技能、记忆和 MCP 工具由默认规则允许。
+- Shell 默认进入自动审批 reviewer。
+- 危险命令、敏感路径、restricted_dirs、项目外未授权路径仍然形成硬拒绝。
 
-### 经典两阶段实战
-1. **规划阶段**：
-   ```text
-   /plan 请分析当前项目的沙箱实现，并制定一个网络隔离的测试方案
-   ```
-   Agent 会检索文件，输出方案至 `.xcode/plans/sandbox_test_plan.md`。
+自动 reviewer 只授予当前动作的 once 权限。`security.approval_policy=never` 时，ask 约束转为确定性 deny。
 
-2. **实施阶段**：
-   ```text
-   /build 请根据 sandbox_test_plan.md 编写测试用例并执行 pytest 验证
-   ```
-   Agent 自动编写测试文件并运行 `pytest`，Reviewer 自动放行测试命令，任务流畅闭环。
+## 4. Act
 
----
+```text
+/act
+```
 
-## 3. findLast 规则匹配引擎
+Act 默认允许只读工具，写工具和 Shell 请求用户审批。用户可以在授权面板选择：
 
-每个模式都可以自定义细粒度的匹配规则（`rules`）。规则引擎采用 **findLast（最后匹配优先）** 语义，用户追加的规则天然覆盖默认规则。
+- `Allow (once)`：当前动作。
+- `Allow this session`：当前 session 的同类目标。
+- `Always allow`：写入项目级永久授权。
+- `Deny`：拒绝当前动作，并可向模型提供下一步建议。
 
-在 `xcode.config.json` 中自定义规则：
+规则、restricted_dirs 和危险命令优先于交互选择。
+
+## 5. 模式切换
+
+REPL 和 TUI 使用 `/plan`、`/build`、`/act`；Web 顶部模式按钮在下一次提交时携带模式。
+
+当前 run 会捕获 ToolGate snapshot。模式切换后的规则在新的模型/工具边界生效，正在执行的单次工具调用保持原决策。
+
+## 6. 自定义 ruleset
 
 ```json
 {
@@ -99,10 +82,11 @@ Xcode 提供了三个内建的执行模式（Execution Modes）。执行模式�
 }
 ```
 
-* `git push` 会强制暂停询问用户；
-* 写入 `deploy/` 目录会被严格禁止。
+规则字段：
 
----
+- `action`：工具名或通配符。
+- `effect`：`allow`、`ask`、`deny`。
+- Shell 条件：`command`、`subcommand`、`subcommand_in`、`flags_any`、`flags_all`。
+- 文件或资源条件：`resource_pattern`。
 
-← **上一篇**：[快速上手与交互模式 (quickstart.md)](quickstart.md) | **下一篇**：[会话账本与分层压缩 (sessions.md)](sessions.md) →
-
+规则按顺序匹配，后匹配规则覆盖同层前匹配规则。用户 ruleset 追加在默认 ruleset 后，因此可以收紧默认动作。

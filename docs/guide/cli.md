@@ -1,74 +1,90 @@
-# CLI 命令行参数与子命令速查
+# CLI、TUI 与 Web 启动参数
 
-Xcode 提供了简洁清晰的命令行调用入口。
-
----
-
-## 1. 基础启动语法
+## 1. 基础语法
 
 ```bash
-xcode [SUBCOMMAND] [OPTIONS]
+xcode [OPTIONS] [COMMAND]
 ```
 
----
+未指定 command 时启动 TUI。可用子命令：
 
-## 2. 核心子命令速查
+| 子命令 | 作用 |
+| --- | --- |
+| `tui` | 启动终端 TUI |
+| `cli` | 启动 CLI / REPL |
+| `setup` | 运行 provider 配置向导 |
+| `config` | 打开交互式设置浏览器 |
+| `web` | 启动 FastAPI + WebSocket 浏览器工作台 |
 
-### `xcode`（默认子命令：`tui`）
-启动全屏终端交互界面（TUI）：
+## 2. 全局参数
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `-p`, `--prompt TEXT` | 空 | 执行单次 prompt 并退出 |
+| `--project-root PATH` | 当前目录 | 指定工作区根目录 |
+| `--config PATH` | 空 | 指定运行时配置文件 |
+| `--sessions-dir PATH` | `.xcode/sessions` | 指定 session 账本目录 |
+| `--resume` | 关闭 | 启动历史 session 选择器 |
+| `--continue` | 关闭 | 恢复当前项目最近的有意义 session |
+| `--session ID` | 空 | 恢复指定 session |
+
+示例：
+
 ```bash
-xcode
-xcode tui
+xcode -p "检查最近修改"
+xcode --project-root ./backend --continue
+xcode --project-root ./backend --session 20260825-120000 cli
+xcode --sessions-dir D:\\xcode-sessions tui
 ```
 
-### `xcode cli`
-启动标准多轮对话 REPL 模式：
-```bash
-xcode cli
-```
+`--resume` 和 `--continue` 代表两种不同路径：前者打开选择器，后者直接使用当前项目最近会话。`--session` 会校验 session 所属项目。
 
-### `xcode setup`
-启动交互式配置向导，配置模型 Provider 与 API Key：
+## 3. `xcode setup`
+
 ```bash
 xcode setup
 ```
 
-### `xcode config`
-启动交互式配置浏览器，管理运行参数（执行模式、审批策略、Shell 等）：
+向导交互式配置 provider、API key、base URL、模型、thinking 和 reasoning effort。配置写入项目根目录的 `xcode.config.json`；用户取消保存时可以使用临时配置运行当前进程。
+
+## 4. `xcode config`
+
 ```bash
 xcode config
-xcode config approval
+xcode config --project-root ./backend
+xcode config --config ./private-settings.json
 ```
 
----
+设置浏览器当前提供执行模式、审批策略、非工作区访问、sandbox mode、sandbox network 和 Shell 等常用设置。每次写入前使用 `XcodeRuntimeConfig` 校验。
 
-## 3. 常用全局选项
+REPL 中的 `/config` 使用同一组设置定义；TUI 将选择菜单、说明和文本表单嵌入当前输出区域。
 
-| 选项 | 缩写 | 参数类型 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `--prompt` | `-p` | string | `None` | 单轮提问模式：执行单次提问并打印结果后立即退出 |
-| `--resume` | `-r` | flag | `False` | 自动恢复当前项目最近一次历史会话 |
-| `--config` | `-c` | path | `None` | 显式指定 `xcode.config.json` 或私有配置文件的路径 |
-| `--project-root` | — | path | 当前工作目录 | 指定 Agent 执行的工作区根目录 |
-| `--version` | `-v` | flag | — | 查看 Xcode 当前版本号 |
-| `--help` | `-h` | flag | — | 查看完整的命令行帮助信息 |
-
----
-
-## 4. 典型调用场景示例
+## 5. `xcode web`
 
 ```bash
-# 场景 1：CI / 脚本化快速代码分析
-xcode -p "检查当前 Git 暂存区的修改是否有明显语法问题"
-
-# 场景 2：基于特定配置文件启动全屏 TUI
-xcode --config ./configs/prod_settings.json
-
-# 场景 3：指定特定项目目录并恢复历史会话
-xcode --project-root /home/user/backend --resume
+xcode web
+xcode web --host 127.0.0.1 --port 8787 --open
+xcode web --project-root ./backend
 ```
 
----
+参数：
 
-← **上一篇**：[Slash 命令完全参考手册 (slash-commands.md)](slash-commands.md) | **下一篇**：[实战场景与使用示例指南 (../examples.md)](../examples.md) →
+- `--host`：绑定地址，默认 `127.0.0.1`。
+- `--port`：端口，默认 `8787`。
+- `--open`：服务启动后打开浏览器。
+- `--project-root`：浏览器工作台使用的项目根目录。
 
+浏览器工作台使用 REST 读取状态，使用 `/ws` 接收实时事件和发送任务、取消、审批消息。详细协议位于 [web.md](web.md)。
+
+## 6. CLI 与 TUI 的共同输入
+
+两种终端界面共享 XcodeApp、工具注册表、session、权限 gate 和命令注册表：
+
+- 普通文本提交 Agent turn。
+- `!` 进入 bash shortcut。
+- `@` 进入文件引用。
+- `$` 进入技能激活。
+- `/` 进入控制命令。
+- Tab 补全命令、工具、技能和文件。
+
+CLI 使用 Rich 输出 Markdown；TUI 使用 inline transcript、步骤灯、工具卡片和滚动视口。

@@ -1,46 +1,90 @@
-# 权限、安全与 Linux 沙箱
+# 权限、安全与 Linux Sandbox
 
-Xcode 构建了一套多层次的纵深防御安全体系（Defense-in-depth），兼顾自动化开发的高效体验与系统环境的安全性。
+Xcode 将语义权限、用户审批、自动 reviewer、路径边界、Shell 分析和 OS sandbox 组合为多层执行边界。工具调用在实际 handler 运行前完成决策。
 
----
+## 1. 决策链
 
-## 1. 纵深防御架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. 策略判定层：PermissionEngine & Execution Modes           │
-│    - 路径白名单与禁访目录 (restricted_dirs)                  │
-│    - findLast 规则引擎精确匹配工具、命令与参数                │
-├─────────────────────────────────────────────────────────────┤
-│ 2. 审批路由层：Approval Router                              │
-│    - Build 模式：独立 Reviewer 模型自动化语义风控             │
-│    - Act 模式：用户人工审批 (HITL)                           │
-├─────────────────────────────────────────────────────────────┤
-│ 3. 进程隔离层：Linux Bubblewrap OS 沙箱                     │
-│    - 宿主系统只读挂载，项目根与 /tmp 可写                    │
-│    - .git / .xcode / 密钥文件 / 敏感凭据全面遮蔽             │
-│    - 独立 Network Namespace 隔离网络访问                    │
-├─────────────────────────────────────────────────────────────┤
-│ 4. 审计脱敏层：JsonlAuditLogger                             │
-│    - 全量记录操作日志并对敏感 Key 进行脱敏                   │
-└─────────────────────────────────────────────────────────────┘
+```text
+Tool call
+  → ActionExtractor
+  → restricted_dirs / path boundary / dangerous command
+  → mode + static policy + shell policy + hook constraints
+  → RuleMatcher
+  → PermissionResolver
+  → saved grants
+  → approval policy
+  → user or auto reviewer
+  → ToolSpecAdapter
+  → handler
 ```
 
----
+`Action` 描述工具、capability、operation、targets 和 unresolved effects。目标可以是 path、command、domain、mcp、skill 或 subagent；`apply_patch` 可以从 patch 内容提取全部文件目标。
 
-## 2. Linux Bubblewrap OS 沙箱
+`PermissionResolver` 以 deny、ask、allow 顺序选取最严格 constraint。每次结果包含 decision、blocked、reason、reason code、remediation、matched rule、source、metadata、approval result 和 action。
 
-在 Linux 平台上，Agent 调用的 `bash` 命令默认被封装在基于 [bubblewrap](https://github.com/containers/bubblewrap)（`bwrap`）的独立隔离环境中运行。
+## 2. 默认模式策略
 
-### 沙箱隔离特性
-1. **文件系统只读保护**：宿主系统的根目录（`/usr`, `/bin`, `/lib`, `/etc` 等）挂载为只读，阻止任何对系统全局文件和包管理器的非授权篡改；
-2. **工作区可写边界**：仅当前项目根目录以及 `/tmp` 挂载为可写；
-3. **版本控制与运行时保护**：项目内的 `.git`、`.xcode`、`.agents` 目录自动重新挂载为只读，禁止 Agent 擅自修改 Git 提交历史或篡改 Xcode 运行时数据；
-4. **敏感凭据遮蔽 (Masking)**：`~/.ssh`、`~/.aws`、`~/.kube`、`~/.gnupg` 等已知密钥目录以及项目内的 `.env*` 敏感环境变量文件会被自动遮蔽为空，防止凭据泄露；
-5. **网络命名空间隔离**：默认启用独立网络命名空间（`network_access: deny`），阻止恶意或意外的网络请求。
+- **Plan**：规则 fallback 为 deny；写入范围限定为 `.xcode/plans/*.md`。
+- **Build**：项目结构化读写默认 allow；Shell 与规则覆盖范围外动作默认 ask，由 auto reviewer 处理。
+- **Act**：读取默认 allow；写入和 Shell 默认 ask，由用户处理。
 
-### 沙箱模式配置
-在 `xcode.config.json` 中配置：
+静态 `security.permissions` 与 `security.tools` 会进入同一 PermissionEngine。具体工具规则追加在权限名展开的规则之后。
+
+## 3. 路径边界
+
+项目 root 通过 `resolve()` 和 `relative_to()` 校验；符号链接路径逐段检查。以下目标进入内置拒绝策略：
+
+- `.git` metadata。
+- `.venv`、`__pycache__`。
+- `.env`、`.env.*`。
+- `.aws`、`.azure`、`.docker`、`.gnupg`、`.kube`、`.netrc`、`.npmrc`、`.pypirc`、`.ssh`。
+- `id_rsa`、`id_ed25519`、`id_ecdsa`、`id_dsa` 等密钥文件。
+- `restricted_dirs` 中的路径，以及无法安全提取目标路径的受限动作。
+
+项目外路径需要 `external_directories` 中的目录覆盖和对应 access：`read`、`write` 或 `read_write`。`non_workspace_access=false` 时，用户外部目录配置停止生效；Xcode 自身的 `~/.xcode` 和 `~/.agents` 保留只读基础设施访问。
+
+`.env.example` 可以读取，写入仍进入敏感路径策略。`sensitive_path_overrides` 只接受精确环境文件路径，凭据目录和密钥文件持续拒绝。
+
+## 4. Shell 分析
+
+Shell analyzer 对 POSIX、PowerShell 和 cmd 提供分类器。分类对象包括：
+
+- 只读命令和纯观察命令。
+- 写入、复制、移动和删除命令。
+- literal 文件路径及其 access。
+- 管道、重定向、变量、glob、命令替换和组合语法。
+- 解析错误、未知命令和待确认 wrapper。
+
+以下命令直接拒绝：`rm -rf /`、主机级关机/重启、`sudo`/`su` 权限提升、`git reset --hard`、强制 `git clean` 等。未知和动态效果按照当前 mode 的 unresolved policy 进入 ask 或 deny。
+
+## 5. 审批与 Grant
+
+审批回调收到工具、参数、原因、工作目录、turn id、transcript 和实际允许的 scope：
+
+| scope | 作用 |
+| --- | --- |
+| `once` | 当前一次执行 |
+| `session` | 当前 session 的匹配目标 |
+| `permanent` | 项目级持久授权 |
+
+多 target 动作只允许 `once`。auto reviewer 只允许 `once`，不能建立 session 或 permanent grant。session grant 存在内存 session store；permanent grant 写入 `.xcode/approval_grants.json`，使用文件锁和原子替换。
+
+`approval_policy`：
+
+- `on-request`：ask 进入配置的 reviewer。
+- `never`：显式 grant 仍可命中，其余 ask 形成确定性 deny。
+
+`approval_router`：`mode` 让 Build 使用 auto reviewer、Act 使用 user；`user` 固定人工；`auto` 固定 reviewer。
+
+## 6. 自动 reviewer
+
+Build reviewer 使用独立 provider 会话，输入包含有界 transcript 和精确 action。system/user 内容作为授权证据；assistant、tool call、tool result、approval reason 和 planned arguments作为待审查证据。
+
+reviewer 返回单个 JSON assessment：outcome、risk_level、user_authorization、rationale。低/中风险的有界动作可以 allow；高风险需要足够授权；critical 风险 deny。provider failure、超时和非法 JSON 进入 failed-closed 结果。
+
+## 7. Linux bubblewrap
+
+默认 Linux sandbox：
 
 ```json
 {
@@ -53,53 +97,18 @@ Xcode 构建了一套多层次的纵深防御安全体系（Defense-in-depth）�
 }
 ```
 
-* `mode` 可选值：
-  * `workspace-write`（默认）：项目与 `/tmp` 可写，宿主其余路径只读；
-  * `read-only`：全部文件系统只读；
-  * `danger-full-access`：允许以当前用户权限读写宿主路径。
+模式：
 
----
+- `read-only`：root filesystem 以只读方式提供。
+- `workspace-write`：项目 root、临时目录和获准可写外部目录可写。
+- `danger-full-access`：使用当前用户的完整文件访问；network allow 时使用本地 subprocess shell。
 
-## 3. 自动审批与 Reviewer 模型
+bubblewrap 设置 user、PID、IPC、UTS namespace，network deny 时设置 network namespace，进程 drop 全部 capability。`.git`、`.agents`、`.xcode` 以只读路径保护；凭据和环境文件通过 `/dev/null` 或 tmpfs 遮蔽。项目 root 之外的 cwd 直接拒绝。
 
-在 Build 模式下，当 Agent 触发 Shell 命令时，Xcode 会将上下文与命令参数提交给独立的 `reviewer` Profile（轻量模型）：
+Linux 之外使用本地 SubprocessShell，语义 PermissionEngine 继续保护工具调用。
 
-* **评估维度**：
-  * 操作的风险等级（Low / Medium / High / Critical）；
-  * 用户意图的授权充分性；
-  * 操作的可逆性与影响范围。
-* **判定逻辑**：
-  * 运行本地单元测试、读取依赖等低风险操作：秒级自动放行（Auto-approved）；
-  * 删除核心文件、跨工作区写入或高风险命令：安全拒绝并转交用户人工确认。
+## 8. 审计与脱敏
 
----
+配置 `observability.audit_path` 后，工具审计记录包含工具、动态决策、policy decision、最终状态、脱敏输入输出、审批范围、grant id、reviewer、风险、授权等级、rationale 和 correlation。
 
-## 4. 外部目录白名单 (external_directories)
-
-若需要允许 Agent 读取或写入项目外部的公共目录（如共享模板或外部文档），可配置白名单：
-
-```json
-{
-  "security": {
-    "external_directories": [
-      {"path": "/shared/docs", "access": "read"},
-      {"path": "/tmp/build-cache", "access": "read_write"}
-    ]
-  }
-}
-```
-
----
-
-## 5. 审计日志 (Audit Logging)
-
-所有工具调用的决策、参数、执行耗时与脱敏后的输出均会写入审计日志文件（通过 `observability.audit_path` 配置）：
-
-```json
-{"timestamp": "2026-08-24T15:30:00Z", "action": "bash", "command": "pytest", "decision": "allow", "router": "auto_reviewer", "sandbox": true}
-```
-
----
-
-← **上一篇**：[核心工具箱与并发调度 (tools.md)](tools.md) | **下一篇**：[配置系统与设置浏览器 (configuration.md)](configuration.md) →
-
+常见 `sk-`、API key、secret、token、password 形式在工具、MCP、外部 hook 和审计边界执行脱敏。详细 hook 生命周期位于 [hooks.md](hooks.md)。

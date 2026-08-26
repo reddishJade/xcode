@@ -1,83 +1,154 @@
-# 配置系统与设置浏览器
+# 配置系统
 
-Xcode 提供了多层级的配置发现栈以及交互式配置浏览器，方便在全局、项目、本地与会话级别灵活管理运行参数。
+Xcode 使用 JSON 运行时配置。配置先按层合并，再通过 Pydantic 模型校验；运行中的 Agent 使用校验后的快照。
 
----
+## 1. 配置文件与优先级
 
-## 1. 配置分层覆盖栈
+`discover_runtime_config()` 按以下顺序读取：
 
-Xcode 按照以下优先级自底向上发现并合并配置（高优先级覆盖低优先级）：
-
-```
-1. 全局配置    ~/.xcode/settings.json        (最低优先级)
-      │
-      ▼
-2. 项目配置    xcode.config.json
-      │
-      ▼
-3. 本地覆盖    .xcode/settings.json
-      │
-      ▼
-4. 环境变量    XCODE_APPROVAL_POLICY, API Keys 等 (最高优先级)
+```text
+~/.xcode/settings.json       全局
+<project>/xcode.config.json  项目
+<project>/.xcode/settings.json 本地
+环境变量                      最后覆盖
 ```
 
-* **项目共享配置 (`xcode.config.json`)**：适合提交到 Git 仓库，供全团队共享相同的执行模式规则、Hooks 与 MCP 服务器配置；
-* **本地私有覆盖 (`.xcode/settings.json`)**：默认被 `.gitignore` 忽略，适合开发者本地临时调整模型 Profile 或路径；
-* **显式指定配置**：启动时使用 `--config /path/to/custom.json` 覆盖配置文件路径。
+后层只覆盖自己显式出现的键，显式写入默认值也会生效。`--config PATH` 将指定文件作为项目配置来源参与解析。
 
----
+常用位置：
 
-## 2. 交互式设置浏览器 (xcode config / /config)
+- `xcode.config.json`：项目运行配置。
+- `.xcode/settings.json`：本地覆盖。
+- `~/.xcode/settings.json`：用户全局默认。
+- `.xcode/mcp_config.json`：项目 MCP server 配置，单独读取。
 
-Xcode 提供了专为运行时调整优化的交互式配置浏览器：
+当前仓库的 `.gitignore` 会忽略 `xcode.config.json` 与 `.xcode/`。团队需要共享配置时，按团队策略调整忽略规则，并单独管理 API key。
+
+## 2. 顶层结构
+
+```json
+{
+  "provider": { "model_profiles": {} },
+  "agent": {},
+  "tools": {},
+  "skills": {},
+  "prompt": {},
+  "paths": {},
+  "observability": {},
+  "hooks": {},
+  "request_hygiene": {},
+  "security": {},
+  "execution_modes": {}
+}
+```
+
+未知字段进入校验错误。嵌套 profile 支持继承 `main`：字符串值可作为只改模型名的 profile，对象值覆盖继承字段。
+
+## 3. Agent 与请求预算
+
+```json
+{
+  "agent": {
+    "max_steps": null,
+    "max_recent_messages": 10,
+    "keep_recent_tokens": 20000,
+    "reserve_tokens": 16384,
+    "compact_trigger_ratio": 0.7,
+    "tool_workers": 4,
+    "tool_timeout_seconds": 120,
+    "watchdog_repeated_tool_limit": 3
+  },
+  "request_hygiene": {
+    "enabled": true,
+    "max_tool_result_bytes": 8000,
+    "max_tool_arg_length": 1000,
+    "keep_head_lines": 50,
+    "keep_tail_lines": 50
+  }
+}
+```
+
+`max_steps` 为空时，Agent 由完成、取消、provider error 和 watchdog 驱动结束。`reserve_tokens` 为输出与运行余量保留空间；上下文达到模型窗口的触发线后进入压缩流程。
+
+## 4. 工具、技能与 prompt
+
+```json
+{
+  "tools": {
+    "shell": "auto",
+    "subagent_extra_tools": ["todowrite"]
+  },
+  "skills": {
+    "trust_project_skills": false
+  },
+  "prompt": {
+    "modules": [
+      "identity", "tool_discipline", "citations", "tools",
+      "search_strategy", "environment", "cwd",
+      "git_preflight", "contextual_retrieval", "notices"
+    ],
+    "instructions": [
+      {"type": "file", "path": "TEAM_RULES.md", "priority": "critical"},
+      {"type": "inline", "content": "Use the project formatter.", "priority": "high"}
+    ]
+  }
+}
+```
+
+指令文件路径要求项目相对路径，累计注入预算为 32 KB。prompt modules 控制稳定、动态和易变 prompt 区域。
+
+## 5. 路径、会话与观测
+
+```json
+{
+  "paths": {
+    "sessions_dir": ".xcode/sessions",
+    "skills_dir": null
+  },
+  "observability": {
+    "audit_path": ".xcode/audit.jsonl"
+  }
+}
+```
+
+相对路径以项目根目录解析。会话账本、快照、MCP 缓存和永久授权默认位于 `.xcode/`。
+
+## 6. 安全与执行模式
+
+```json
+{
+  "security": {
+    "approval_policy": "on-request",
+    "approval_router": "mode",
+    "non_workspace_access": true,
+    "auto_review_timeout_seconds": 90,
+    "sandbox": {
+      "mode": "workspace-write",
+      "network_access": "deny"
+    },
+    "restricted_dirs": ["secrets"],
+    "permissions": {"read": "allow", "web": "ask"},
+    "tools": {"bash": "ask"}
+  },
+  "execution_modes": {
+    "default_mode": "act",
+    "plan": {"rules": []},
+    "build": {"rules": []},
+    "act": {"rules": []}
+  }
+}
+```
+
+`permissions` 先展开为工具集合，`tools` 再按具体工具覆盖。规则字段支持 `action`、`effect`、shell 的 `command`/`subcommand`/flags，以及 `resource_pattern`。决策顺序和目录边界位于 [security.md](security.md)。
+
+## 7. 交互式编辑
 
 ```bash
-# 启动 CLI 配置浏览器
 xcode config
-
-# 或直接跳转至特定配置项
-xcode config approval
+xcode config --project-root ./project
+xcode config --config ./private.json
 ```
 
-在 TUI / REPL 会话中，输入 `/config` 即可打开相同的配置面板：
+REPL 中使用 `/config`。浏览器当前展示常用模式、审批、sandbox 和 Shell 设置；文本或枚举写入前先验证，校验失败时保持原文件。
 
-```
-┌──────────────────────────────────────────────────────────┐
-│ Xcode Settings Browser                                   │
-├──────────────────────────────────────────────────────────┤
-│ > Default Mode           build                           │
-│   Approval Policy        agent decides                   │
-│   Non-Workspace Access   on                              │
-│   Shell                  auto                            │
-├──────────────────────────────────────────────────────────┤
-│ Description:                                             │
-│ 'agent decides': Automatically review actions with the   │
-│ independent reviewer profile.                            │
-└──────────────────────────────────────────────────────────┘
-```
-
-* **上下键选择**：底部实时展示当前设置项的作用说明与安全权衡；
-* **回车进入修改**：快速选择枚举值，当前生效值标注 `(current)`；
-* **原子校验落盘**：修改后通过 `XcodeRuntimeConfig` 进行强类型校验，非法值拒绝写入。
-
----
-
-## 3. 完整配置项速查
-
-详尽的配置文件字段定义与默认值参考，请参阅 [CONFIG.md](../CONFIG.md)。
-
-| 配置模块 | 主要控制字段 | 详细说明 |
-|---|---|---|
-| `provider` | `model_profiles`, `transport`, `thinking` | 大模型提供商、思考链与多 Profile 配置 |
-| `execution_modes` | `default_mode`, `rules` | Plan / Build / Act 模式与自定义匹配规则 |
-| `security` | `sandbox`, `approval_policy`, `restricted_dirs` | Bubblewrap 沙箱、审批策略与禁访路径 |
-| `tools` | `shell`, `subagent_extra_tools` | 默认 Shell 类型与子代理额外工具开放 |
-| `mcp` | `.xcode/mcp_config.json` | Model Context Protocol 服务器配置 |
-| `hooks` | `entries` | 外部命令事件 Hook 列表 |
-| `paths` | `sessions_dir`, `skills_dir` | 会话与技能扫描目录 |
-| `observability` | `audit_path` | JSONL 结构化审计日志输出路径 |
-
----
-
-← **上一篇**：[权限、安全与 Linux 沙箱 (security.md)](security.md) | **下一篇**：[MCP 服务与工具扩展 (mcp.md)](mcp.md) →
-
+环境变量 `XCODE_APPROVAL_POLICY` 可以覆盖 `security.approval_policy`。provider API key 按 profile、provider 环境变量和通用 `OPENAI_API_KEY` 等顺序解析，详见 [providers.md](providers.md)。

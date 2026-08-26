@@ -1,37 +1,71 @@
-# Subagents 子代理架构
+# Subagents 子代理
 
-在处理长程复杂任务（如大型代码重构、全库安全扫描、多模块独立开发）时，单一会话容易出现上下文混乱。Xcode 实现了**基于独立 Durable Session 的子代理（Subagent）委托架构**。
+`subagent` 工具为独立任务创建 session-backed child agent。child 拥有自己的 session、history、inbox、recorder、correlation 和 ToolGate，同时继承父运行时的 provider 配置、项目边界和安全规则。
 
----
+## 1. One-shot 与 Continuable
 
-## 1. 架构核心不变量
+| mode | 生命周期 | 适用场景 |
+| --- | --- | --- |
+| `one_shot` | 完成后释放 activation，session 保留 | 一次性搜索、局部修改、独立验证 |
+| `continuable` | 保留 child session，可继续提交 turn | 需要后续追问或多轮协作的子任务 |
 
-* **独立 Durable Session**：子代理并不是父会话中的临时对象，每一个子代理实例拥有独立的 Session ID、事实账本（JSONL）、消息历史与 Context 预算；
-* **谱系与生命周期追踪**：父会话通过 `subagent_run` 事件精准记录子代理的 Batch ID、Run ID、启动/完成/失败状态与总结摘要；
-* **权限域继承与不可扩张**：子代理继承父会话的权限边界，且无法越权获取父会话未授权的能力。子代理不包含二次委托工具，最大委托深度严格限制为一层。
+创建一个 child：
 
----
+```json
+{
+  "description": "检查 provider 适配器",
+  "prompt": "阅读相关实现，列出协议差异和风险，不修改文件。",
+  "mode": "one_shot",
+  "subagent_type": "research"
+}
+```
 
-## 2. 运行模式：One-shot 与 Continuable
+## 2. 批量委派
 
-Xcode 支持两种子代理执行模式：
+多个独立任务使用 `tasks`：
 
-### 2.1 One-shot 模式（并行单回合任务）
-适合可以独立完成的勘察、搜索或单元测试验证任务：
-* 父 Agent 可并行启动多个 One-shot 子代理；
-* 子代理执行完成后自动汇总结果返回给父 Agent，并自动释放（Release）进程资源。
+```json
+{
+  "tasks": [
+    {"description": "检查 AI 层", "prompt": "分析 provider 错误处理", "subagent_type": "research"},
+    {"description": "检查工具层", "prompt": "分析文件编辑边界", "subagent_type": "coding"}
+  ],
+  "max_concurrent": 2
+}
+```
 
-### 2.2 Continuable 模式（多轮对话协作）
-适合需要多步骤交互、反复推敲的复杂子任务：
-* 创建具有持久化生命周期的子代理；
-* 父 Agent 通过 `subagent_continue` 按子代理 Session ID 进行多轮 FIFO 消息传递；
-* 即使系统重启，也可从磁盘账本中“冷恢复”子代理上下文继续对话。
+批量任务固定为独立 `one_shot` child。单次请求最多 16 个任务，默认并发上限 4；结果按 task index 汇总，实时 update 展示每个任务的状态和当前工具。
 
----
+## 3. Continuable API
 
-## 3. 工具配置与共享
+```text
+/subagent             通过模型创建 continuable child
+subagent_continue     向 direct child 提交下一 FIFO turn
+subagent_list         列出 direct child session
+subagent_control      interrupt 或 release child activation
+```
 
-默认情况下，子代理仅拥有核心代码工具。如需为子代理开放额外工具（例如 `todowrite`），可在 `xcode.config.json` 中配置：
+工具调用示例：
+
+```json
+{
+  "session_id": "child-session-id",
+  "prompt": "继续检查刚才发现的错误处理，给出最小修复建议。"
+}
+```
+
+`subagent_continue` 只接受 direct continuable child。`subagent_control`：
+
+```text
+{"session_id": "child-session-id", "action": "interrupt"}
+{"session_id": "child-session-id", "action": "release"}
+```
+
+interrupt 取消当前 child turn；release 释放进程内 activation，child 账本继续保留并可冷恢复。
+
+## 4. Child 工具集合
+
+child registry 默认包含核心文件、搜索、Shell、Web 和 patch 工具。通过 `tools.subagent_extra_tools` 可以追加工具，例如：
 
 ```json
 {
@@ -41,16 +75,25 @@ Xcode 支持两种子代理执行模式：
 }
 ```
 
----
+child 收到显式 prompt 和自己的 system prompt。父 session 的完整 transcript作为父侧事实保留，child 的模型上下文从 child session 自身建立。
 
-## 4. 优雅关闭与资源回收 (Child-first Teardown)
+## 5. 权限与谱系
 
-当退出应用或中断任务时，Xcode 采用 **Child-first 逆序清理策略**：
-1. 向所有活跃的子代理发送取消信号，并等待进行中的操作平稳收敛（Settle）；
-2. 逆序释放子代理的 Activation 句柄；
-3. 确保所有子代理的账本落盘完成后，再关闭父会话的 MCP 等共享网络与进程资源。
+child 使用父 gate 的项目 root、external directories、sensitive overrides、静态权限、mode ruleset 和 grant 来源，并建立 child session id 对应的独立 correlation 与 hook manager。child 工具继续经过 ActionExtractor、PermissionEngine 和审批流程。
 
----
+父 session 记录：
 
-← **上一篇**：[Skills 技能系统 (skills.md)](skills.md) | **下一篇**：[长期记忆系统 (memory.md)](memory.md) →
+- `SubagentDescriptor`：child session、父 session、mode、类型、provider、composition 和工具名。
+- `SubagentActivationEvent`：materialized/released activation。
+- `SubagentRunEvent`：run id、batch id、task index、状态、摘要和错误。
 
+## 6. 关闭顺序
+
+父运行时关闭时：
+
+1. 取消所有 active child turn。
+2. 等待 child activation 在有界时间内进入 idle。
+3. 逆序释放 activation。
+4. 关闭 MCP、reviewer 和其他共享资源。
+
+child 未能在期限内收敛时返回明确关闭错误，避免静默遗留运行。

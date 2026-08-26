@@ -1,74 +1,83 @@
-# Slash 命令完整参考手册
+# Slash 命令参考
 
-Xcode 在 REPL / TUI 会话中提供了超过 30 条实用的 `/slash` 控制命令。所有命令均以斜杠 `/` 开头，支持 `Tab` 键自动补全。
+REPL 和 TUI 使用统一命令注册表。输入 `/` 后按 Tab 可以补全命令、说明和参数提示。
 
----
+## 1. 模式与运行控制
 
-## 1. 模式控制 (Mode Control)
+| 命令 | 用法 | 作用 |
+| --- | --- | --- |
+| `/plan` | `/plan [prompt]` | 进入 Plan；带 prompt 时排入下一次运行 |
+| `/build` | `/build` | 进入 Build |
+| `/act` | `/act` | 进入 Act |
+| `/steer` | `/steer MESSAGE` | 将消息送入当前 run 的下一次模型边界 |
+| `/queue` | `/queue steer\|followup\|interrupt\|MESSAGE` | 设置 busy policy，或排入 follow-up |
+| `/verbose` | `/verbose normal\|verbose\|debug` | 设置输出详细程度 |
+| `/debug` | `/debug on\|off` | 切换 debug 输出 |
+| `/compact` | `/compact` | 立即执行完整上下文压缩并保存 replacement |
+| `/goal` | `/goal CONDITION\|pause\|resume\|clear` | 设置、暂停、恢复或清除独立验收目标 |
 
-| 命令 | 语法 | 功能说明 |
-|---|---|---|
-| `/plan` | `/plan [目标]` | 切换至 Plan 只读规划模式，专注于架构分析与设计文档生成 |
-| `/build` | `/build` | 切换至 Build 自动构建模式，允许文件修改，Shell 命令由 Reviewer 自动放行 |
-| `/act` | `/act [需求]` | 切换至 Act 人机协作模式，文件写入与 Shell 执行需用户确认 |
-| `/verbose` | `/verbose [0\|1\|2]` | 设置运行日志与思考链的详细输出级别 |
-| `/debug` | `/debug` | 切换 Debug 调试模式开关 |
-| `/steer` | `/steer <指令>` | 在 Agent 执行循环中动态注入实时引导建议 |
-| `/queue` | `/queue <消息>` | 设置忙时消息排队策略，或在当前 Run 结束后立即排队执行新任务 |
+`/steer` 适合当前 run 的即时纠偏；`/queue` 的 follow-up 在当前 run 完成后启动新的 run。忙时普通输入默认按 `busy_mode` 处理。
 
----
+## 2. Session 生命周期
 
-## 2. 会话生命周期与分支 (Session Lifecycle & Branching)
+| 命令 | 用法 | 作用 |
+| --- | --- | --- |
+| `/new` | `/new` | 建立空 session |
+| `/clear` | `/clear` | 清空当前 session 并恢复空状态 |
+| `/continue` | `/continue` | 恢复当前项目最近的 session |
+| `/resume` | `/resume [ID]` | 选择或恢复指定 session |
+| `/sessions` | `/sessions` | 打开历史 session 选择器 |
+| `/rename` | `/rename TITLE` | 修改当前 session 标题 |
+| `/fork` | `/fork` | 从当前 branch 的用户消息选择 fork 起点 |
+| `/clone` | `/clone` | 复制当前 session |
+| `/tree` | `/tree` | 浏览 session entry tree 并移动 head |
+| `/rewind` | `/rewind [N]` | 回退最近 N 个用户 turn，默认 1 |
 
-| 命令 | 语法 | 功能说明 |
-|---|---|---|
-| `/new` 或 `/clear` | `/new` | 清空当前上下文，开启全新会话 |
-| `/continue` | `/continue` | 自动恢复当前项目最近一次的活跃会话 |
-| `/resume` | `/resume [ID]` | 交互式选择或按 Session ID 恢复历史会话 |
-| `/sessions` | `/sessions` | 列出当前项目的所有持久化历史会话 |
-| `/rename` | `/rename <新名称>` | 为当前会话设置易于识别的可读名称 |
-| `/fork` | `/fork [消息序号]` | 从指定的对话轮次创建新的会话分叉分支 |
-| `/clone` | `/clone` | 将当前完整会话克隆为一个独立的 JSONL 文件 |
-| `/tree` | `/tree` | 以 ASCII 树状图展示当前项目的会话派生谱系 |
+切换、fork、clone、rewind 后，Agent 从新的 branch 重新恢复 history、运行状态和上下文。
 
----
+## 3. 文件回滚
 
-## 3. 回滚与快照恢复 (Rollback & Undo)
+| 命令 | 用法 | 作用 |
+| --- | --- | --- |
+| `/undo` | `/undo [N\|--list]` | 查看或回退 Git snapshot turn |
 
-| 命令 | 语法 | 功能说明 |
-|---|---|---|
-| `/undo` | `/undo [N\|--list]` | **文件级原子撤销**：根据快照瞬时将受影响的文件还原至修改前 |
-| `/rewind` | `/rewind [N]` | **上下文撤销**：撤销最近 N 轮问答交互历史 |
-| `/compact` | `/compact` | 手动触发上下文分层压缩并写入滚动 Checkpoint |
+`/undo` 校验 post snapshot 冲突和权限。冲突或无法恢复的文件进入 skipped；session transcript 保持可追踪。
 
----
+## 4. 模型与配置
 
-## 4. 模型与配置 (Model & Config)
+| 命令 | 用法 | 作用 |
+| --- | --- | --- |
+| `/model` | `/model` | 显示当前模型和 base URL |
+| `/model` | `/model MODEL` | 切换 main profile 模型 |
+| `/model` | `/model PROFILE/MODEL:LEVEL` | 切换 main/subagent 与 thinking level |
+| `/effort` | `/effort LEVEL` | 设置当前 provider 的 reasoning effort |
+| `/thinking` | `/thinking on\|off` | 切换 thinking |
+| `/config` | `/config [setting]` | 打开或定位交互式设置浏览器 |
 
-| 命令 | 语法 | 功能说明 |
-|---|---|---|
-| `/model` | `/model [Profile/Model]` | 查看或动态切换当前使用的 LLM 模型及 Thinking 参数 |
-| `/effort` | `/effort <level>` | 调整推理思考力度（`off`/`low`/`medium`/`high`/`max`） |
-| `/thinking` | `/thinking on\|off` | 开启或关闭模型思考链（Reasoning）的实时展示 |
-| `/config` | `/config [setting]` | 打开交互式配置浏览器，或直接调整特定运行参数 |
+`PROFILE` 当前使用 `main` 或 `subagent`。具体 effort 选项由 active transport 决定。
 
----
+## 5. 工具与扩展
 
-## 5. 工具与外部扩展 (Tools & Extensions)
+| 命令 | 用法 | 作用 |
+| --- | --- | --- |
+| `/tool` | `/tool list` | 列出注册工具 |
+| `/tool` | `/tool NAME INPUT` | 通过当前权限 gate 直接执行工具 |
+| `/skill` | `/skill NAME [prompt]` | 显式激活技能并可追加任务 |
+| `/memory` | `/memory list\|search\|add\|update\|delete` | 检索和维护项目/用户记忆 |
+| `/permissions` | `/permissions [list\|clear]` | 查看权限状态或清除 session grant |
+| `/hooks` | `/hooks` | 查看外部 hook 诊断 |
+| `/mcp` | `/mcp status\|reload` | 查看或重载 MCP runtime |
+| `/context` | `/context` | 查看 token、工具、记忆和技能占用 |
+| `/btw` | `/btw QUESTION` | 发起侧问题并恢复主 session |
 
-| 命令 | 语法 | 功能说明 |
-|---|---|---|
-| `/tool` | `/tool [list\|NAME]` | 查看已注册工具列表、Schema 定义或手动测试调用 |
-| `/skill` | `/skill <NAME>` | 显式激活特定 Skill 并将指令加载至上下文 |
-| `/memory` | `/memory [list\|search\|add]` | 列出、检索或显式追加长期项目记忆 |
-| `/permissions` | `/permissions [list\|clear]` | 查看当前会话已授予的临时权限或一键清除授权 |
-| `/mcp` | `/mcp status\|reload` | 检查 MCP 服务器连接状态或热重载 MCP 配置 |
-| `/hooks` | `/hooks` | 检查外部事件 Hook 的配置与执行统计 |
-| `/context` | `/context` | 查看当前上下文窗口的 Token 消耗分布与压缩水位线 |
-| `/btw` | `/btw <问题>` | 发起侧问题快速问答，不污染主任务会话历史 |
-| `/exit` | `/exit` 或 `/quit` | 安全保存状态并退出会话 |
+工具输入可以使用 JSON object；只有一个 required 参数的工具支持对应的文本简写。
 
----
+## 6. 退出
 
-← **上一篇**：[外部事件 Hooks (hooks.md)](hooks.md) | **下一篇**：[CLI 命令行参数速查 (cli.md)](cli.md) →
+| 命令 | 用法 | 作用 |
+| --- | --- | --- |
+| `/exit` | `/exit` | 保存当前摘要并退出 |
+| `/quit` | `/quit` | `/exit` 的隐藏 alias |
+| `/revert` | `/revert [N\|--list]` | `/undo` 的隐藏 alias |
 
+终端 Ctrl+C：输入栏有内容时先清空；活动 run 中请求取消；空闲状态连续触发后退出。

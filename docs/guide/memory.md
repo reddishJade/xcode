@@ -1,55 +1,68 @@
-# 长期记忆系统 (Long-term Memory)
+# 长期记忆
 
-Xcode 设计了轻量、可审查且确定性的长期记忆系统，用于在不同会话之间持久化沉淀架构决策、业务规范与个人习惯。
+Xcode 的长期记忆保存跨 session 可复用的规则、架构决策、验证事实和解决方案。当前任务连续性由 session surface 与账本承担。
 
----
+## 1. 两个记忆层
 
-## 1. 存储分层与职责分离
+| 层 | 默认文件 | 适合保存 |
+| --- | --- | --- |
+| project | `<project>/MEMORY.md` | 项目架构约定、技术选择、团队规则 |
+| user | `~/.xcode/memory/MEMORY.md` | 个人偏好、跨项目习惯、通用工作方式 |
 
-Xcode 的记忆系统严格区分“当前会话状态”与“跨会话长期事实”，分为两层持久化存储：
+每个 Markdown H2 section 形成一条 `MemoryRecord`。记录包含 title、body、layer 和由 layer/title 生成的稳定 id。旧格式的 metadata 行会被解析并从检索正文中剥离；退休状态记录不会进入结果。
 
+## 2. 按需检索
+
+Agent 拥有 `search_memory` 工具：
+
+```json
+{
+  "query": "provider timeout",
+  "scope": "providers",
+  "layer": "all",
+  "limit": 3
+}
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. 项目级记忆 (Project Memory)                              │
-│    路径：<项目根目录>/MEMORY.md                              │
-│    职责：记录团队级架构约定、技术选型、不可变的业务规则      │
-├─────────────────────────────────────────────────────────────┤
-│ 2. 用户级记忆 (User Memory)                                 │
-│    路径：~/.xcode/memory/MEMORY.md                          │
-│    职责：记录个人编码风格偏好（如命名习惯、常用工具偏好）    │
-└─────────────────────────────────────────────────────────────┘
-```
 
-> **边界原则**：会话进行中的具体任务进度、当前临时状态和 Todo 清单属于会话上下文，**绝不**写入 `MEMORY.md`。
+检索使用确定性 BM25：
 
----
+- 英文、数字、代码、路径和中文 token 参与匹配。
+- 中文文本额外生成字符和双字 token。
+- exact match 与 token overlap 提升排序分数。
+- `project` 在相同分数条件下排在 `user` 前面。
+- 单次结果最多 10 条。
 
-## 2. BM25 确定性检索机制
+索引按记忆文件的 path、inode、mtime 和 size 建立签名；文件变化后自动重建。
 
-传统 Agent 经常在每一轮交互中盲目向量召回大量不相关记忆，造成 Token 浪费与模型注意力分散。
+普通 turn 只接收长期记忆使用协议，模型在需要时调用 `search_memory`。恢复旧 session 时可以读取最多 6000 token 的 memory overview，并将其作为背景上下文。
 
-Xcode 采用 **基于 BM25 算法的按需检索机制**：
-* **只读检索工具 (`search_memory`)**：Agent 仅在遇到可能依赖过往知识的问题时，主动调用 `search_memory` 工具并发检索项目与用户记忆；
-* **无自动强行注入**：普通回合中不会强行将全部记忆注入 System Prompt；仅在会话冷恢复（Resume）时，在独立预算内恢复最关键的项目事实。
+## 3. 写入与维护
 
----
-
-## 3. 在 REPL 中管理记忆
-
-在 REPL / TUI 中，支持通过 `/memory` 命令直接管理和检索记忆：
+REPL 命令：
 
 ```text
-# 查看所有已持久化的长期记忆
 /memory list
-
-# 按关键词检索记忆
-/memory search 数据库
-
-# 显式追加一条项目记忆
-/memory add "本项目所有新 API 必须遵循 RESTful 规范并返回统一的 Result JSON 结构"
+/memory list project
+/memory search provider timeout
+/memory add project Retry policy | Provider requests retry transient failures.
+/memory update project Retry policy | Retry transient provider failures twice.
+/memory delete project Retry policy
 ```
 
----
+`/memory add` 也支持 `title: body` 或两个空格分隔字段的简写。项目和用户层通过命令中的可选前缀选择。
 
-← **上一篇**：[Subagents 子代理架构 (subagents.md)](subagents.md) | **下一篇**：[外部事件 Hooks (hooks.md)](hooks.md) →
+写入规则：
 
+- 输入需要一个 H2 标题和至少三字符正文。
+- 标题重复或正文重复时拒绝写入。
+- update 按标题替换并保留其他 section。
+- delete 按标题删除并保留文件其他内容。
+- 文件锁保护并发修改。
+- 临时文件、flush、fsync 和 replace 提供原子更新。
+- 成功写入后清除内存检索索引。
+
+## 4. 记忆与上下文的关系
+
+记忆检索结果通过普通工具结果进入当前 session，可以参与后续压缩和恢复。记忆文件本身作为可读文件拥有来源路径；memory overview 以 `[project memory · memory_id]` 或 `[user memory · memory_id]` 标识层和记录身份。
+
+长期记忆适合稳定事实，todo、当前 diff、临时错误和当前回合进度属于 session context。保存记忆时使用具体、可复用、可验证的描述，并保留项目层与用户层的边界。

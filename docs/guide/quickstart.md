@@ -1,96 +1,99 @@
 # 快速上手与交互模式
 
-Xcode 提供了单轮问答、全屏终端交互（TUI）、交互式命令行（CLI/REPL）以及编程式调用等多种交互形态。
+## 1. 第一次运行
 
----
-
-## 1. 单轮提问模式 (-p)
-
-对于不需要多轮上下文的快速任务或脚本化调用，直接使用 `-p`（`--prompt`）选项：
-
-```bash
-# 查询代码实现
-xcode -p "解释当前项目中的执行模式是如何定义的"
-
-# 查找特定文件
-xcode -p "列出 src/xcode/ai/ 目录下所有的 provider 适配器"
-```
-Agent 会完成分析与回答后自动退出。
-
----
-
-## 2. 全屏终端界面 (TUI)
-
-直接运行 `xcode`（或 `xcode tui`）会启动基于 `prompt-toolkit` 的全屏交互界面：
+在项目根目录完成 provider 配置后：
 
 ```bash
 xcode
 ```
 
-### TUI 界面核心特性
-* **顶部状态栏**：实时展示当前执行模式（`plan`/`build`/`act`）、活跃模型 profile 与上下文占用；
-* **流式 Markdown 渲染**：支持代码高亮、表格与实时 Reasoning 思考链折叠；
-* **结构化工具面板**：终端命令输出（Terminal Intent）、代码 Diff（Diff Intent）与子代理运行状态均以独立视窗投影展示；
-* **快捷交互键**：
-  * `Esc`：快速关闭当前弹出菜单或表单；
-  * `Tab`：快速切换输入焦点或补全 Slash 命令。
+默认进入终端 TUI。输入任务并按 Enter 提交，Shift+Enter 插入换行；部分终端可以使用 Esc、Enter 作为换行组合键。
 
----
+常见的第一条任务：
 
-## 3. 标准 REPL 模式 (CLI)
+```text
+先浏览项目结构，说明入口、核心模块和当前 Git 状态。
+```
 
-如果你更习惯标准流式终端输出，可以使用 CLI 模式：
+Agent 通常先使用读取与搜索工具建立上下文，再根据任务需要编辑文件、运行命令和返回验证结果。
+
+## 2. 三种常用运行方式
+
+### 单次 prompt
+
+```bash
+xcode -p "解释 src/xcode/harness/agent_runtime 的运行流程"
+xcode -p "检查当前修改并给出风险摘要"
+```
+
+单次模式消费事件流，打印文本结果后退出。它适合快速分析和脚本化调用。
+
+### 终端 CLI / REPL
 
 ```bash
 xcode cli
 ```
 
-在 REPL 模式中，支持多轮对话与以下增强输入语法：
+CLI 保留多轮 session，并提供命令补全、Markdown 输出、推理摘要和工具摘要。详细命令位于 [slash-commands.md](slash-commands.md)。
 
-| 语法 | 说明 | 示例 |
-|---|---|---|
-| `@path/to/file` | 将本地文件内容读取并注入到提问中 | `@src/xcode/main.py 请分析该文件的参数定义` |
-| `!command` | 直接在本地终端执行命令，不经过模型 | `!git status` |
-| `$skill-name ...` | 显式激活特定 Skill 并委派任务 | `$refactor 重构工具注册逻辑` |
-| `/command` | 执行 Xcode 内置 Slash 控制命令 | `/plan`, `/undo`, `/config` |
-
----
-
-## 4. 会话恢复与历史管理
-
-Xcode 自动落盘所有会话：
+### TUI
 
 ```bash
-# 恢复当前项目最近一次的会话
-xcode --resume
-
-# 列出所有历史会话并选择恢复
 xcode
-# 在交互菜单中选择 "Resume Session" 或使用 /resume 命令
+xcode tui
 ```
 
----
+TUI 在当前终端中显示 inline transcript，包含输入、步骤、推理、工具卡片、授权面板、滚动历史和状态栏。
 
-## 5. Python 编程式调用
+## 3. 输入语法
 
-你也可以在 Python 脚本中将 Xcode 作为组件引入：
+| 语法 | 行为 | 示例 |
+| --- | --- | --- |
+| `@path` | 读取项目内文件并附加为 `<file-reference>` | `@src/xcode/main.py 解释参数解析` |
+| `!command` | 直接调用注册的 `bash` 工具 | `!git status --short` |
+| `$skill task` | 激活指定技能，再提交剩余任务 | `$code-review 检查这个补丁` |
+| `/command` | 执行 session、模式、模型等控制命令 | `/plan 分析实现路径` |
+
+`@file` 使用项目文件读取路径，`!command` 仍然经过工具门控和当前执行模式。
+
+## 4. 会话恢复
+
+```bash
+# 当前项目最近会话
+xcode --continue
+
+# 打开会话选择器
+xcode --resume
+
+# 恢复指定 session
+xcode --session SESSION_ID
+```
+
+进入 CLI 后也可以使用 `/continue`、`/resume`、`/sessions`。恢复过程从 session branch 重建模型历史、运行模式、Goal、todo、技能激活和相关上下文。
+
+## 5. 一个稳妥的编码流程
+
+1. `/plan`：读取结构、搜索相关符号、确认修改范围。
+2. `/build`：让项目内结构化写入自动进行，边界动作交给自动 reviewer。
+3. 先使用 `edit_file` 做局部修改；多文件关联变更使用 `apply_patch`。
+4. 使用 `bash` 运行聚焦验证。
+5. `/context` 查看上下文与用量，必要时 `/compact`。
+6. `/undo` 回退文件快照，或 `/rewind` 回退当前 session branch。
+7. `/act` 回到每项写入和 Shell 的人工审批模式。
+
+## 6. Python 调用
 
 ```python
 from pathlib import Path
 from xcode.coding_agent.app import build_app
 
-# 构造 Coding Agent 实例
 app = build_app(project_root=Path.cwd())
-
-# 发起问答
-response = app.ask("审查当前仓库的配置体系，并列出所有支持的环境变量。")
-print(response)
-
-# 关闭并释放资源
-app.close()
+try:
+    answer = app.ask("检查当前项目的配置和工具注册，输出结构化摘要。")
+    print(answer)
+finally:
+    app.close()
 ```
 
----
-
-← **上一篇**：[模型与 Provider 配置 (providers.md)](providers.md) | **下一篇**：[执行模式：Plan / Build / Act (modes.md)](modes.md) →
-
+异步环境使用 `await app.aask(...)`。持续消费事件时使用 `ask_stream` 或 `aask_stream`，前端可以直接消费 `AgentHarnessEvent`。
