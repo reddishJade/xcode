@@ -61,6 +61,23 @@ def _write_session(sessions_dir: Path) -> None:
             "content": _claim("Continue migration in src/api.py"),
             "created_at": "2026-01-01T00:03:00+00:00",
         },
+        {
+            "id": "w1",
+            "parent_id": "u2",
+            "type": "event",
+            "content": {
+                "schema_version": 2,
+                "type": "context_window_reset",
+                "step": 1,
+                "data": {
+                    "window_id": "window-2",
+                    "trigger": "manual",
+                    "replacement": [],
+                },
+                "correlation": {},
+            },
+            "created_at": "2026-01-01T00:04:00+00:00",
+        },
     ]
     path = sessions_dir / "session-session-a.jsonl"
     path.write_text(
@@ -73,7 +90,7 @@ def _write_session(sessions_dir: Path) -> None:
                 "sessions": [
                     {
                         "id": "session-a",
-                        "head_id": "u2",
+                        "head_id": "w1",
                     }
                 ]
             }
@@ -107,7 +124,7 @@ def test_history_around_returns_verbatim_neighbors(tmp_path: Path) -> None:
     assert "src/api.py" in around[2].text
 
 
-def test_history_tool_exposes_search_and_around(tmp_path: Path) -> None:
+def test_history_tool_exposes_window_search_read_and_around(tmp_path: Path) -> None:
     sessions_dir = tmp_path / ".xcode" / "sessions"
     _write_session(sessions_dir)
     history = SessionHistory(sessions_dir)
@@ -118,9 +135,17 @@ def test_history_tool_exposes_search_and_around(tmp_path: Path) -> None:
     around = tool.handler(
         {"operation": "around", "message_id": "a1", "before": 0, "after": 0}
     )
+    exact = tool.handler(
+        {"operation": "read", "message_id": "a1", "offset": 2, "max_chars": 4}
+    )
+    windows = tool.handler({"operation": "list_windows"})
 
     assert "message_id=u1" in search
     assert "message_id=a1" in around
+    assert "offset=2" in exact
+    assert "next_offset=6" in exact
+    assert exact.endswith("will")
+    assert "window_id=window-2" in windows
     assert set(tool.schema["properties"]) == {
         "operation",
         "query",
@@ -128,6 +153,8 @@ def test_history_tool_exposes_search_and_around(tmp_path: Path) -> None:
         "limit",
         "before",
         "after",
+        "offset",
+        "max_chars",
     }
 
 

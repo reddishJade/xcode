@@ -135,12 +135,12 @@ async def test_instrumented_provider_reports_stream_activity_and_call_number() -
     assert calls[0].input_tokens == 100
     assert calls[0].output_tokens == 20
     assert updates[0][0] == "provider_started"
-    assert "summary #1" in updates[0][1]
+    assert "agent #1" in updates[0][1]
     streaming = [detail for stage, detail in updates if stage == "provider_streaming"]
     assert any("reasoning" in detail for detail in streaming)
     assert any("answer" in detail for detail in streaming)
     assert updates[-1][0] == "provider_finished"
-    assert "summary #1" in updates[-1][1]
+    assert "agent #1" in updates[-1][1]
 
 
 async def test_instrumented_provider_heartbeats_before_first_event(

@@ -91,6 +91,7 @@ def _build_structured_result(result: AgentLoopResult) -> AgentHarnessResult:
             "model_time_ms": sum(result.metrics.model_latencies_ms),
             "tool_time_ms": sum(result.metrics.tool_latencies_ms),
             "steps": result.metrics.steps,
+            "context_window_resets": result.metrics.context_window_resets,
         }
 
     if (

@@ -54,21 +54,21 @@ coding_agent product
   → next model step or final result
 ```
 
-`XcodeApp` 负责装配共享的 provider、工具注册表、session recorder、inbox、compactor、skills、memory、MCP 和安全配置。每个 run 捕获一个 `AgentComposition` generation；provider、工具、配置、静态 gate 策略和请求组装器保持同一代视图。
+`XcodeApp` 负责装配共享的 provider、工具注册表、session recorder、inbox、context rollover、skills、memory、MCP 和安全配置。每个 run 捕获一个 `AgentComposition` generation；provider、工具、配置、静态 gate 策略和请求组装器保持同一代视图。
 
 ## 3. 三种状态表达
 
 ### 运行状态
 
-`AgentContext` 保存本次循环的 system prompt、request prefix、messages、tools、context state、project root、cwd 和 request budget。`ContextManager` 统一管理 history、world state、token usage、压缩计数和 prompt/cache fingerprint。
+`AgentContext` 保存本次循环的 system prompt、request prefix、messages、tools、context state、project root、cwd 和 request budget。`ContextManager` 统一管理 history、world state、token usage、换窗计数和 prompt/cache fingerprint。
 
 ### 事件状态
 
-Agent 核心事件包括 turn、message、thinking、tool execution 和 compaction。Harness 翻译为结构化 `AgentHarnessEvent`，前端消费 text delta、reasoning delta、tool use、tool update、tool result、compaction 和 final。
+Agent 核心事件包括 turn、message、thinking、tool execution 和 context-window reset。Harness 翻译为结构化 `AgentHarnessEvent`，前端消费 text delta、reasoning delta、tool use、tool update、tool result、context-window reset 和 final。
 
 ### 持久状态
 
-Session recorder 保存稳定语义事件。流式碎片用于实时展示；JSONL 账本保存可重建模型历史、工具配对、压缩 replacement、provider request、Goal 和子代理谱系。
+Session recorder 保存稳定语义事件。流式碎片用于实时展示；JSONL 账本保存可重建模型历史、工具配对、换窗 replacement、provider request、Goal 和子代理谱系。
 
 ## 4. 请求组装
 

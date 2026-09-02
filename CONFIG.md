@@ -25,7 +25,7 @@ profile 由 `_resolve_model_profiles` 按 main 配置补齐：字符串视为 mo
 | `chat_model` | string | `"deepseek-v4-flash"` | 聊天模型名 |
 | `base_url` | string | `"https://api.deepseek.com"` | OpenAI-compatible API 地址 |
 | `api_key` | string | `""` | 显式 API key；留空按环境变量查找 |
-| `context_window` | int/null | `null` | 上下文窗口覆盖（token 数）。覆盖模型注册表默认值，影响压缩触发线与 `/context` 显示。例如 1M 窗口的模型只用 256K：`"context_window": 262144` |
+| `context_window` | int/null | `null` | 上下文窗口覆盖（token 数）。覆盖模型注册表默认值，影响自动换窗触发线、请求预算与 `/context` 显示。例如可将某个大窗口模型限制为 256K：`"context_window": 262144` |
 | `thinking` | bool | `true` | 传给支持 thinking 的 provider |
 | `reasoning_effort` | string/null | `"high"` | DeepSeek 等支持 effort 的 provider。值：`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max` |
 | `clear_thinking` | bool | `false` | ChatGLM 保留式思考 |
@@ -114,12 +114,13 @@ xcode config                                # CLI 启动同一浏览器
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `max_steps` | 正整数（可选） | 未设置 | 单次任务最大循环轮次；默认无限制 |
-| `compact_threshold` | int | `0` | 消息数阈值；0 关闭 |
-| `compact_token_threshold` | int | `0` | token 阈值；0 关闭 |
-| `max_recent_messages` | int | `10` | 压缩时保留的近期消息数 |
-| `keep_recent_tokens` | int | `20000` | 压缩时为近期原文保留的 token 预算 |
+| `rollover_message_threshold` | int | `0` | 可选的消息数换窗阈值；0 不设置额外阈值 |
+| `rollover_token_threshold` | int | `0` | 可选的绝对 token 换窗阈值；0 不设置额外阈值 |
+| `automatic_rollover` | bool | `true` | 是否按当前模型窗口自动换窗 |
+| `fallback_recent_messages` | int | `10` | 找不到当前 user 回合时的消息数兜底 |
+| `fallback_recent_tokens` | int | `20000` | 找不到当前 user 回合时的 token 兜底 |
 | `reserve_tokens` | int | `16384` | 为模型输出和工具交互保留的 token 预算 |
-| `compact_trigger_ratio` | float | `0.7` | 相对上下文窗口的自动压缩触发比例 |
+| `rollover_trigger_ratio` | float | `0.95` | 相对当前模型窗口的自动换窗比例 |
 | `tool_workers` | int | `4` | 单个 parallel batch 的最大活跃工具数；小于 1 时按 1 执行 |
 | `tool_timeout_seconds` | float | `120.0` | 单个工具调用超时 |
 | `watchdog_repeated_tool_limit` | int | `3` | 连续重复同一工具阈值 |
@@ -231,7 +232,7 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `event` | string | 必填 | `pre_tool`、`post_tool`、`on_error`、`on_compact`、`before_agent_start`、`before_provider_request` |
+| `event` | string | 必填 | `pre_tool`、`post_tool`、`on_error`、`on_context_window_reset`、`before_agent_start`、`before_provider_request` |
 | `command` | string[] | 必填 | 非空 argv 数组 |
 | `matcher` | string/null | `null` | 可选事件匹配表达式 |
 | `timeout` | number | `10.0` | 正数秒数 |
@@ -389,8 +390,8 @@ Automatic approval review approved (risk: low, authorization: high):
 
 `todowrite` 是主 agent 默认可用的会话级工具。它以完整列表替换当前清单，
 最多允许一个 `in_progress` 项。清单写入
-session transcript 和 `RunState`，并在每轮动态上下文中重新注入，因此不会因
-compaction 丢失。只有将 `"todowrite"` 加入 `subagent_extra_tools` 时，
+session transcript 和 `RunState`，并在每轮动态上下文中重新注入，因此换窗后仍可恢复。
+只有将 `"todowrite"` 加入 `subagent_extra_tools` 时，
 subagent 才会共享该会话清单。
 
 `todowrite` 输入使用 `todos` 数组。每个 todo 需要 `id`、`content`、`status`，
@@ -496,13 +497,13 @@ MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺
 
 ### Token ROI 原则
 
-优化策略：稳定可缓存前缀、压缩动态历史、控制工具输出、渐进发现工具、token-aware 压缩触发、智能重复抑制。
+优化策略：稳定可缓存前缀、使用可丢弃的当前工作窗口、控制工具输出、渐进发现工具、按模型窗口换窗、智能重复抑制。
 
-`LayeredCompactor`（`src/xcode/harness/agent_runtime/compaction.py`）：
-- stale read_file 裁剪
-- 大工具输出预算裁剪
-- 旧 tool_result 微压缩
-- transcript 落盘
-- older messages summary compact
+`ContextWindowRollover`（`src/xcode/harness/agent_runtime/context_window.py`）：
+- 关闭旧工作窗口，不生成摘要
+- 保留启动上下文、已激活 skill 和当前回合
+- 对当前 surface 的过期读取和大工具输出做预算裁剪
+- 原始 transcript 始终作为无损事实源，通过 `history` 按需召回
+- 项目根 `NOTE.md` 作为显式工作交接状态
 
 `RepeatDetector`（`src/xcode/agent/watchdog.py`）：文件变更感知的重复检测，变更后自动清除只读调用历史。

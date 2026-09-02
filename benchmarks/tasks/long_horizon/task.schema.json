@@ -16,12 +16,12 @@
     "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
     "description": {"type": "string", "minLength": 1},
     "workspace": {"type": "string", "minLength": 1},
-    "compaction": {
+    "context_window": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "max_recent_messages": {"type": "integer", "minimum": 1},
-        "keep_recent_tokens": {"type": "integer", "minimum": 1}
+        "fallback_recent_messages": {"type": "integer", "minimum": 1},
+        "fallback_recent_tokens": {"type": "integer", "minimum": 1}
       }
     },
     "turns": {
@@ -33,7 +33,7 @@
         "required": ["prompt"],
         "properties": {
           "prompt": {"type": "string", "minLength": 1},
-          "compact_before": {"type": "boolean"},
+          "rollover_before": {"type": "boolean"},
           "restart_after": {"type": "boolean"}
         }
       }

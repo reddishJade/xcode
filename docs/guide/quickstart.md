@@ -78,7 +78,7 @@ xcode --session SESSION_ID
 2. `/build`：让项目内结构化写入自动进行，边界动作交给自动 reviewer。
 3. 先使用 `edit_file` 做局部修改；多文件关联变更使用 `apply_patch`。
 4. 使用 `bash` 运行聚焦验证。
-5. `/context` 查看上下文与用量，必要时 `/compact`。
+5. `/context` 查看上下文与用量，需要主动清理工作集时使用 `/new-context`。
 6. `/undo` 回退文件快照，或 `/rewind` 回退当前 session branch。
 7. `/act` 回到每项写入和 Shell 的人工审批模式。
 

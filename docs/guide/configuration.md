@@ -50,10 +50,13 @@ Xcode 使用 JSON 运行时配置。配置先按层合并，再通过 Pydantic �
 {
   "agent": {
     "max_steps": null,
-    "max_recent_messages": 10,
-    "keep_recent_tokens": 20000,
+    "rollover_message_threshold": 0,
+    "rollover_token_threshold": 0,
+    "automatic_rollover": true,
+    "fallback_recent_messages": 10,
+    "fallback_recent_tokens": 20000,
     "reserve_tokens": 16384,
-    "compact_trigger_ratio": 0.7,
+    "rollover_trigger_ratio": 0.95,
     "tool_workers": 4,
     "tool_timeout_seconds": 120,
     "watchdog_repeated_tool_limit": 3
@@ -68,7 +71,7 @@ Xcode 使用 JSON 运行时配置。配置先按层合并，再通过 Pydantic �
 }
 ```
 
-`max_steps` 为空时，Agent 由完成、取消、provider error 和 watchdog 驱动结束。`reserve_tokens` 为输出与运行余量保留空间；上下文达到模型窗口的触发线后进入压缩流程。
+`max_steps` 为空时，Agent 由完成、取消、provider error 和 watchdog 驱动结束。`reserve_tokens` 为输出与运行余量保留空间。自动换窗优先使用 provider profile 的 `context_window` 覆盖，否则读取当前模型注册窗口，默认在 95% 处触发，且不超过窗口减去 reserve 的硬上限。
 
 ## 4. 工具、技能与 prompt
 

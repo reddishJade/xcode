@@ -1,22 +1,25 @@
 # Benchmarks
 
-## Long-horizon context compaction benchmark
+## Long-horizon context-window rollover benchmark
 
-This benchmark measures one controlled question: how much layered context
-compaction reduces cumulative input tokens, cost, and interrupted long sessions
-without lowering test-defined task success.
+This benchmark measures one controlled question: how much summary-free context
+rollover reduces cumulative input tokens, cost, and interrupted long sessions
+without lowering test-defined task success or state retention.
 
 ### Experimental groups
 
-- **Baseline** sets the runtime compactor to `None`. It keeps full logical
+- **Baseline** sets runtime context rollover to `None`. It keeps full logical
   history and restores full history after a simulated process restart.
-- **Xcode** enables `LayeredCompactor`, durable session surface writes, and
-  surface-plus-tail restoration.
+- **Xcode** opens a fresh active context at the declared boundary, appends a
+  typed `context_window_reset` event, and restores the durable surface. No
+  summary request is made.
 
 All other runtime configuration is shared. Request hygiene remains enabled in
-both groups, so the ablation isolates persistent layered compaction instead of
+both groups, so the ablation isolates fresh-window rollover instead of
 mixing it with transport sanitation. Web tools and subagents are prohibited by
-a shared benchmark instruction. Both groups run in Build mode because the
+a shared benchmark instruction. Automatic and model-initiated rollover are
+disabled; the runner alone applies each task's declared boundary. Both groups
+run in Build mode because the
 non-interactive benchmark has no HITL approval callback; workspace writes and
 verification commands therefore execute automatically under the same safety
 boundaries. Repeat order alternates to reduce time-order bias.
@@ -28,15 +31,15 @@ parent checkout, and runtime artifacts such as `.benchmark/` and Python caches
 are excluded from status output. Any fixture-provided `.git` metadata is not
 copied.
 
-Checkpoint and transcript state lives in a sibling runtime directory rather
+Session transcript state lives in a sibling runtime directory rather
 than inside the task workspace. The runner can still resume from it, while the
 Agent's workspace-scoped tools cannot treat internal benchmark state as task
 evidence. `--keep-workspaces` preserves both locations for debugging; normal
 runs remove them after writing the raw record.
 
-Provider `UsageUpdate` events are recorded for normal agent requests and model
-summary requests. A run is excluded from token and cost aggregation if any
-provider request omits usage. Known-model cost uses the price snapshot in
+Provider `UsageUpdate` events are recorded for every agent request. A run is
+excluded from token and cost aggregation if any provider request omits usage.
+Known-model cost uses the price snapshot in
 `src/xcode/ai/models.py` and is stored in every raw result.
 
 ### Run the paired example
@@ -65,7 +68,7 @@ cost. `--require-complete-usage` (alias `--fail-on-incomplete`) writes the repor
 and then exits with status 2 if any selected pair still lacks complete usage.
 
 Interactive terminals show an overall run bar plus the current task's turn,
-model request, tool, compaction, restart, and verification status. During a
+model request, tool, context-window reset, restart, and verification status. During a
 model call, the status distinguishes waiting for the first event from active
 reasoning, answer streaming, tool calls, usage, and finalization. It also shows
 the request number, elapsed time, time since the last event, and event count,
@@ -89,20 +92,17 @@ uv run python -m benchmarks.reports.generate_report \
   --output-dir benchmark-results/long_horizon/RUN_DIR
 ```
 
-Use `--summary-mode deterministic` only for offline smoke runs. Resume and
-surface replacement stays enabled, but summaries use the compactor's
-deterministic fallback rather than the production model summarizer.
-
 ### Task contract
 
 Each `task.json` declares:
 
 - an isolated fixture workspace;
-- ordered user turns, including explicit compact/restart boundaries;
+- ordered user turns, including explicit rollover/restart boundaries;
 - one test command that determines `task_success`;
 - deterministic state facts such as changed/unchanged file hashes, forbidden
   paths, required text, and post-resume commands;
-- the recent-message and recent-token budgets used by the Xcode group.
+- fallback recent-message and recent-token budgets used when no active user
+  turn can be identified.
 
 The included parser task is a wiring example, not enough evidence for a resume
 claim. A resume run counts only when `surface_resumes` is nonzero. Before
@@ -112,9 +112,8 @@ and inspect per-task pairs instead of reporting only a pooled mean.
 ### Reported metrics
 
 - `input_tokens_total` and `peak_input_tokens` come from provider usage;
-- `pre_compaction_input_tokens` covers turns before the declared compaction;
-- `post_compaction_input_tokens` includes the summary request and all later
-  turns;
+- `pre_rollover_input_tokens` covers turns before the declared rollover;
+- `post_rollover_input_tokens` starts at the declared fresh-window turn;
 - `post_resume_input_tokens` starts on the turn after the restart boundary;
 - `task_success` comes only from the verification process exit code;
 - `state_retention` is the fraction of deterministic facts that pass;
@@ -125,7 +124,7 @@ and inspect per-task pairs instead of reporting only a pooled mean.
   not a success criterion.
 
 Each metric uses its own paired cohort. Total Token and cost require complete
-usage for the whole baseline/Xcode pair, while post-compaction metrics remain
+usage for the whole baseline/Xcode pair, while post-rollover metrics remain
 eligible when missing usage occurred only before that phase. Correctness and
 state-retention metrics include the selected attempt regardless of usage
 completeness. Reports show the cohort size on every row.

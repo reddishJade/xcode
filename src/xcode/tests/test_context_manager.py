@@ -113,7 +113,7 @@ def test_record_request_and_provider_usage_updates_session_metadata() -> None:
     assert manager.prompt_cache.request_sha256
 
 
-def test_compaction_replaces_history_and_resets_context_baseline() -> None:
+def test_rollover_replaces_history_and_resets_context_baseline() -> None:
     manager = ContextManager()
     manager.replace_history([UserMessage(content="old")])
     manager.record_provider_usage({"prompt_tokens": 9})
@@ -121,20 +121,20 @@ def test_compaction_replaces_history_and_resets_context_baseline() -> None:
         SystemMessage(content="dynamic context")
     )
 
-    replacement = manager.complete_compaction(
-        [UserMessage(content="summary")],
+    replacement = manager.complete_rollover(
+        [UserMessage(content="fresh window")],
         reason="manual",
         before_messages=9,
     )
 
-    assert replacement == [UserMessage(content="summary")]
+    assert replacement == [UserMessage(content="fresh window")]
     assert manager.history == replacement
     assert manager.context_state.persistent_messages == []
-    assert manager.compaction.context_window_id == 1
-    assert manager.compaction.compaction_count == 1
-    assert manager.compaction.last_reason == "manual"
-    assert manager.compaction.last_messages_before == 9
-    assert manager.compaction.last_messages_after == 1
+    assert manager.context_window.context_window_id == 1
+    assert manager.context_window.reset_count == 1
+    assert manager.context_window.last_reason == "manual"
+    assert manager.context_window.last_messages_before == 9
+    assert manager.context_window.last_messages_after == 1
     assert manager.token_usage.last_prompt_tokens is None
 
 

@@ -35,6 +35,7 @@ class AgentLoopMetrics(BaseModel):
     tool_latencies_ms: list[float] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
+    context_window_resets: int = 0
     model_config = ConfigDict(extra="forbid")
 
 

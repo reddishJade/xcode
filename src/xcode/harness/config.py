@@ -33,7 +33,7 @@ HookEventName = Literal[
     "pre_tool",
     "post_tool",
     "on_error",
-    "on_compact",
+    "on_context_window_reset",
     "before_agent_start",
     "before_provider_request",
 ]
@@ -60,12 +60,13 @@ DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     max_steps: Annotated[StrictInt, Field(gt=0)] | None = None
-    compact_threshold: StrictInt = 0
-    compact_token_threshold: StrictInt = 0
-    max_recent_messages: StrictInt = 10
-    keep_recent_tokens: StrictInt = 20000
+    rollover_message_threshold: StrictInt = 0
+    rollover_token_threshold: StrictInt = 0
+    automatic_rollover: StrictBool = True
+    fallback_recent_messages: StrictInt = 10
+    fallback_recent_tokens: StrictInt = 20000
     reserve_tokens: StrictInt = 16384
-    compact_trigger_ratio: StrictFloat = Field(default=0.7, gt=0, lt=1)
+    rollover_trigger_ratio: StrictFloat = Field(default=0.95, gt=0, le=1)
     tool_workers: StrictInt = 4
     tool_timeout_seconds: StrictFloat | StrictInt = 120.0
     watchdog_repeated_tool_limit: StrictInt = 3

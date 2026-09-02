@@ -32,12 +32,15 @@ from xcode.harness.agent_runtime import (
     CancellationToken,
     ContextualRetrievalState,
 )
-from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.harness.agent_runtime.config import (
     GateConfig,
     GateRuntimeConfig,
     build_request_assembler,
     resolve_permission_policy,
+)
+from xcode.harness.agent_runtime.context_window import (
+    ContextWindowController,
+    ContextWindowRollover,
 )
 from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.harness.config import AgentConfig, XcodeRuntimeConfig
@@ -92,7 +95,7 @@ def build_hook_manager(
         for event in (
             "post_tool",
             "on_error",
-            "on_compact",
+            "on_context_window_reset",
             "before_agent_start",
             "before_provider_request",
         ):
@@ -123,9 +126,9 @@ def build_agent(
     session_inbox: SessionInbox,
     contextual_state: ContextualRetrievalState | None = None,
     shell_spec: ShellSpec | None = None,
-    compact_controller: CompactController | None = None,
+    context_window_controller: ContextWindowController | None = None,
     cancellation_token: CancellationToken | None = None,
-    compactor: LayeredCompactor | None = None,
+    context_rollover: ContextWindowRollover | None = None,
     fallback_provider: ModelProvider | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     skill_registry: SkillRegistry | None = None,
@@ -267,8 +270,8 @@ def build_agent(
                     JsonlAuditLogger(audit_path).write if audit_path else None
                 ),
             ),
-            compactor=compactor,
-            compact_controller=compact_controller,
+            context_rollover=context_rollover,
+            context_window_controller=context_window_controller,
             cancellation_token=cancellation_token,
             project_root=project_root,
             skill_registry=skill_registry,

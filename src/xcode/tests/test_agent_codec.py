@@ -5,7 +5,6 @@ from __future__ import annotations
 from xcode.agent._codec import convert_to_llm
 from xcode.agent.messages import (
     AssistantMessage,
-    CompactionSummaryMessage,
     SystemMessage,
     ToolResultMessage,
     UserMessage,
@@ -87,16 +86,3 @@ class TestConvertToolResultMessage:
         assert "line1" in result[0]["content"]
         assert "line2" in result[0]["content"]
         assert "block" in result[0]["content"]
-
-
-class TestConvertCompactionSummary:
-    def test_compaction_summary_wraps_in_tags(self) -> None:
-        msg = CompactionSummaryMessage(
-            summary="Previous context was...", tokens_before=500
-        )
-        result = convert_to_llm([msg])
-        assert result[0]["role"] == "user"
-        text = str(result[0]["content"])
-        assert "<summary>" in text
-        assert "Previous context was..." in text
-        assert "</summary>" in text

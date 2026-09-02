@@ -1,20 +1,29 @@
-"""上下文压缩消融实验的公共运行器。"""
+"""上下文换窗消融实验的公共运行器。"""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
-from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import threading
 import time
+from collections.abc import AsyncIterator, Callable
+from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
+from benchmarks.evaluators.state_retention import (
+    capture_initial_state,
+    evaluate_state_retention,
+    retention_rate,
+)
+from benchmarks.evaluators.test_result import run_command
+from benchmarks.models import LongHorizonTask
+from benchmarks.runners.progress import ProgressStage, ProgressUpdate
+from xcode.agent.messages import AgentMessage
 from xcode.ai.events import (
     Message,
     ProviderEvent,
@@ -26,12 +35,9 @@ from xcode.ai.events import (
 from xcode.ai.models import get_models, get_providers
 from xcode.ai.providers.base import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
-from xcode.agent.messages import AgentMessage
+from xcode.ai.usage import UsageTotals
 from xcode.coding_agent.app import XcodeApp, build_app
-from xcode.harness.agent_runtime.compaction import (
-    LayeredCompactor,
-    build_compact_summarize_fn,
-)
+from xcode.harness.agent_runtime.context_window import ContextWindowRollover
 from xcode.harness.agent_runtime.result import AgentHarnessResult
 from xcode.harness.config import (
     HooksRuntimeConfig,
@@ -40,17 +46,7 @@ from xcode.harness.config import (
 )
 from xcode.harness.session.surface import project_session_surface
 
-from benchmarks.evaluators.state_retention import (
-    capture_initial_state,
-    evaluate_state_retention,
-    retention_rate,
-)
-from benchmarks.evaluators.test_result import run_command
-from benchmarks.models import LongHorizonTask
-from benchmarks.runners.progress import ProgressStage, ProgressUpdate
-
 Variant = Literal["baseline", "xcode"]
-SummaryMode = Literal["model", "deterministic"]
 
 _OVERFLOW_MARKERS = (
     "context length",
@@ -91,7 +87,6 @@ class RunOptions:
     repeat: int
     attempt: int = 1
     temperature: float | None = None
-    summary_mode: SummaryMode = "model"
     keep_workspace: bool = False
     progress_callback: Callable[[ProgressUpdate], None] | None = None
 
@@ -113,7 +108,7 @@ class ProviderCallRecord:
 
 
 class InstrumentedProvider:
-    """固定采样参数并记录主调用与摘要调用。"""
+    """固定采样参数并记录模型调用。"""
 
     def __init__(
         self,
@@ -149,6 +144,18 @@ class InstrumentedProvider:
     def reasoning_effort(self) -> str | None:
         return self._delegate.reasoning_effort
 
+    @property
+    def context_window(self) -> int | None:
+        return self._delegate.context_window
+
+    @property
+    def usage_totals(self) -> UsageTotals:
+        return self._delegate.usage_totals
+
+    @property
+    def cache_hit_rate(self) -> float | None:
+        return self._delegate.cache_hit_rate
+
     async def stream(
         self,
         messages: list[Message],
@@ -167,8 +174,7 @@ class InstrumentedProvider:
         with self._lock:
             self._request_count += 1
             request_index = self._request_count
-        short_kind = "summary" if not tools else "agent"
-        label = f"{short_kind} #{request_index} · {self._delegate.model}"
+        label = f"agent #{request_index} · {self._delegate.model}"
         activity_lock = threading.Lock()
         activity: dict[str, float | int | str | None] = {
             "events": 0,
@@ -223,7 +229,7 @@ class InstrumentedProvider:
             if heartbeat is not None:
                 heartbeat.join(timeout=1)
             record = ProviderCallRecord(
-                kind="compaction_summary" if not tools else "agent",
+                kind="agent",
                 model=self._delegate.model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -234,7 +240,7 @@ class InstrumentedProvider:
             with self._lock:
                 self._calls.append(record)
             detail = (
-                f"{short_kind} #{request_index} · in={input_tokens} "
+                f"agent #{request_index} · in={input_tokens} "
                 f"out={output_tokens} · "
                 f"{record.duration_seconds:.1f}s"
             )
@@ -425,7 +431,7 @@ def run_task(
     turn_records: list[dict[str, object]] = []
     runtime_errors: list[str] = []
     terminations: list[str] = []
-    compactions = 0
+    context_window_resets = 0
     restarts = 0
     surface_resumes = 0
     runtime_dir = output_dir / "runtime" / run_id
@@ -434,7 +440,7 @@ def run_task(
         task,
         sessions_dir=runtime_dir / "sessions",
     )
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     started = time.perf_counter()
     app = _build_benchmark_app(
         workspace,
@@ -453,22 +459,20 @@ def run_task(
         for turn_index, turn in enumerate(task.turns, 1):
             current_turn = turn_index
             emit_progress("turn_started", turn.prompt, turn=turn_index)
-            if turn.compact_before and variant == "xcode":
-                app.agent.request_compaction()
+            if turn.rollover_before and variant == "xcode":
+                app.agent.request_context_window()
 
             call_start = len(calls)
             turn_started = time.perf_counter()
             try:
-                result, turn_compactions = _run_turn(
+                result, turn_resets = _run_turn(
                     app,
                     turn.prompt,
-                    progress_callback=lambda stage, detail: emit_progress(
-                        stage,
-                        detail,
-                        turn=turn_index,
+                    progress_callback=lambda stage, detail, turn_number=turn_index: (
+                        emit_progress(stage, detail, turn=turn_number)
                     ),
                 )
-            except Exception as exc:
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
                 emit_progress("error", str(exc), turn=turn_index)
                 runtime_errors.append(f"turn {turn_index}: {exc}")
                 turn_records.append(
@@ -484,7 +488,7 @@ def run_task(
                 )
                 break
 
-            compactions += turn_compactions
+            context_window_resets += turn_resets
             terminations.append(str(result.termination_reason))
             turn_tools = [
                 {"name": call.name, "input": dict(call.input)}
@@ -497,7 +501,7 @@ def run_task(
                     "turn": turn_index,
                     "duration_seconds": time.perf_counter() - turn_started,
                     "termination_reason": str(result.termination_reason),
-                    "compactions": turn_compactions,
+                    "context_window_resets": turn_resets,
                     "provider_calls": [call.to_dict() for call in turn_usage],
                     "tool_calls": turn_tools,
                 }
@@ -520,10 +524,8 @@ def run_task(
                     variant,
                     options,
                     calls,
-                    progress_callback=lambda stage, detail: emit_progress(
-                        stage,
-                        detail,
-                        turn=current_turn or None,
+                    progress_callback=lambda stage, detail, turn_number=current_turn: (
+                        emit_progress(stage, detail, turn=turn_number or None)
                     ),
                 )
                 app.agent.load_history(rebuilt)
@@ -580,7 +582,6 @@ def run_task(
         "attempt": options.attempt,
         "model": app.agent.provider.model,
         "temperature": options.temperature,
-        "summary_mode": options.summary_mode,
         "execution_mode": "build",
         "baseline_commit": baseline_commit,
         "models_used": models_used,
@@ -612,7 +613,7 @@ def run_task(
         "context_overflow": overflow,
         "runtime_errors": runtime_errors,
         "termination_reasons": terminations,
-        "compactions": compactions,
+        "context_window_resets": context_window_resets,
         "restarts": restarts,
         "surface_resumes": surface_resumes,
         "provider_calls": [call.to_dict() for call in calls],
@@ -661,8 +662,9 @@ def _benchmark_runtime_config(
     )
     agent = base.agent.model_copy(
         update={
-            "max_recent_messages": task.compaction.max_recent_messages,
-            "keep_recent_tokens": task.compaction.keep_recent_tokens,
+            "automatic_rollover": False,
+            "fallback_recent_messages": (task.context_window.fallback_recent_messages),
+            "fallback_recent_tokens": task.context_window.fallback_recent_tokens,
         }
     )
     paths = base.paths.model_copy(update={"sessions_dir": sessions_dir})
@@ -698,15 +700,9 @@ def _build_benchmark_app(
         calls,
         progress_callback,
     )
-    app.agent.provider = instrumented
+    app.agent.replace_primary_provider(instrumented)
     if variant == "baseline":
-        app.agent.compactor = None
-    elif isinstance(app.agent.compactor, LayeredCompactor):
-        app.agent.compactor.summarize_fn = (
-            build_compact_summarize_fn(instrumented)
-            if options.summary_mode == "model"
-            else None
-        )
+        app.agent.context_rollover = None
     return app
 
 
@@ -716,15 +712,15 @@ def _run_turn(
     progress_callback: Callable[[ProgressStage, str], None] | None = None,
 ) -> tuple[AgentHarnessResult, int]:
     result: AgentHarnessResult | None = None
-    compactions = 0
+    context_window_resets = 0
     # Benchmark 不提供交互审批；固定 Build 模式让工作区内写入和验证命令
     # 在两个消融分组中以相同策略自动执行。
     for event in app.ask_stream(prompt, mode="build"):
-        if event.type == "compaction":
-            compactions += 1
+        if event.type == "context_window_reset":
+            context_window_resets += 1
             if progress_callback is not None:
                 progress_callback(
-                    "compaction",
+                    "context_window_reset",
                     f"removed={event.data.messages_removed} "
                     f"remaining={event.data.messages_after}",
                 )
@@ -734,7 +730,7 @@ def _run_turn(
             result = event.data
     if result is None:
         raise RuntimeError("agent run ended without a final event")
-    return result, compactions
+    return result, context_window_resets
 
 
 def _tool_call_detail(call: object) -> str:
@@ -755,7 +751,10 @@ def _rebuild_history(
     app: XcodeApp,
     variant: Variant,
 ) -> tuple[list[AgentMessage], bool]:
-    if variant == "baseline" or not isinstance(app.agent.compactor, LayeredCompactor):
+    if variant == "baseline" or not isinstance(
+        app.agent.context_rollover,
+        ContextWindowRollover,
+    ):
         return app.agent.history_messages(), False
     surface = project_session_surface(app.session_store.build_branch())
     return list(surface.messages), surface.generation > 0
@@ -765,9 +764,9 @@ def _build_phase_metrics(
     task: LongHorizonTask,
     turn_records: list[dict[str, object]],
 ) -> dict[str, object]:
-    """按任务声明的压缩和重启边界聚合 provider usage。"""
-    compaction_turn = next(
-        (index for index, turn in enumerate(task.turns, 1) if turn.compact_before),
+    """按任务声明的换窗和重启边界聚合 provider usage。"""
+    rollover_turn = next(
+        (index for index, turn in enumerate(task.turns, 1) if turn.rollover_before),
         None,
     )
     restart_after_turn = next(
@@ -779,33 +778,32 @@ def _build_phase_metrics(
         turn = record.get("turn")
         if isinstance(turn, int) and not isinstance(turn, bool):
             calls_by_turn[turn] = _serialized_provider_calls(record)
-    all_calls = [call for turn in sorted(calls_by_turn) for call in calls_by_turn[turn]]
     metrics: dict[str, object] = {
-        "compaction_turn": compaction_turn,
+        "rollover_turn": rollover_turn,
         "restart_after_turn": restart_after_turn,
     }
-    if compaction_turn is None:
-        metrics.update(_empty_phase_metrics("pre_compaction"))
-        metrics.update(_empty_phase_metrics("post_compaction"))
+    if rollover_turn is None:
+        metrics.update(_empty_phase_metrics("pre_rollover"))
+        metrics.update(_empty_phase_metrics("post_rollover"))
     else:
         metrics.update(
             _phase_metrics(
-                "pre_compaction",
+                "pre_rollover",
                 [
                     call
                     for turn, calls in calls_by_turn.items()
-                    if turn < compaction_turn
+                    if turn < rollover_turn
                     for call in calls
                 ],
             )
         )
         metrics.update(
             _phase_metrics(
-                "post_compaction",
+                "post_rollover",
                 [
                     call
                     for turn, calls in calls_by_turn.items()
-                    if turn >= compaction_turn
+                    if turn >= rollover_turn
                     for call in calls
                 ],
             )
@@ -824,10 +822,6 @@ def _build_phase_metrics(
                 ],
             )
         )
-    summary_calls = [
-        call for call in all_calls if call.get("kind") == "compaction_summary"
-    ]
-    metrics.update(_phase_metrics("compaction_summary", summary_calls))
     return metrics
 
 

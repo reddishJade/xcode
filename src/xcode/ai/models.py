@@ -212,21 +212,29 @@ def get_model_context_window(model: str | None) -> int | None:
     if not model:
         return None
     model_lower = model.lower()
-    for provider_models in _MODELS.values():
-        for mid, m in provider_models.items():
-            if mid in model_lower:
-                return m.context_window
+    candidates = (
+        (model_id, profile)
+        for provider_models in _MODELS.values()
+        for model_id, profile in provider_models.items()
+    )
+    for model_id, profile in sorted(
+        candidates,
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        if model_id in model_lower:
+            return profile.context_window
     return None
 
 
-def effective_compact_threshold(
+def effective_rollover_threshold(
     model: str | None,
     reserve_tokens: int = 0,
     fallback_threshold: int = 32000,
-    trigger_ratio: float = 0.7,
+    trigger_ratio: float = 0.95,
     context_window_override: int | None = None,
 ) -> int:
-    """计算自动压缩触发线。
+    """计算自动换窗触发线。
 
     context_window_override 优先于模型注册表默认窗口，允许在配置中
     限制实际使用的上下文窗口（如 1M 窗口的模型只用 256K）。

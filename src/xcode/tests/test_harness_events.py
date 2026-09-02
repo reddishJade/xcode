@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from xcode.agent.events import (
     AgentStartEvent,
-    CompactionEvent,
+    ContextWindowResetEvent,
     MessageUpdateEvent,
     ThinkingUpdateEvent,
     ToolExecutionEndEvent,
@@ -20,7 +20,7 @@ from xcode.agent.types import (
     ToolCallContent,
 )
 from xcode.harness.agent_runtime.events import (
-    CompactionStructuredEvent,
+    ContextWindowResetStructuredEvent,
     ReasoningDeltaStructuredEvent,
     TextDeltaStructuredEvent,
     ToolResultStructuredEvent,
@@ -28,7 +28,7 @@ from xcode.harness.agent_runtime.events import (
     TurnEndStructuredEvent,
     _StreamTranslationState,
     _tool_update_text,
-    _translate_compaction,
+    _translate_context_window_reset,
     _translate_event,
     _translate_message_update,
     _translate_thinking_update,
@@ -114,21 +114,22 @@ def test_tool_execution_end_error() -> None:
     assert result.data.status == "error"
 
 
-def test_compaction_event() -> None:
+def test_context_window_reset_event() -> None:
     state = _StreamTranslationState()
-    result = _translate_compaction(
-        CompactionEvent(
+    result = _translate_context_window_reset(
+        ContextWindowResetEvent(
+            window_id="window-2",
             messages_removed=5,
             messages_after=3,
-            summary_token_estimate=200,
             trigger="token_limit",
-            replacement=[UserMessage(content="summary")],
+            replacement=[UserMessage(content="current turn")],
         ),
         state,
     )
-    assert isinstance(result, CompactionStructuredEvent)
+    assert isinstance(result, ContextWindowResetStructuredEvent)
+    assert result.data.window_id == "window-2"
     assert result.data.messages_removed == 5
-    assert result.data.replacement == (UserMessage(content="summary"),)
+    assert result.data.replacement == (UserMessage(content="current turn"),)
 
 
 class TestTranslateMessageUpdate:

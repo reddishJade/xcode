@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from .messages import AgentMessage, ToolResultMessage
@@ -105,23 +103,14 @@ class ThinkingUpdateEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CompactionArchive(BaseModel):
-    """压缩归档元数据。"""
+class ContextWindowResetEvent(BaseModel):
+    """旧上下文窗口关闭、新窗口开始事件。"""
 
-    path: str
-    status: Literal["summary", "full"]
-    model_config = ConfigDict(extra="forbid")
-
-
-class CompactionEvent(BaseModel):
-    """上下文压缩事件，携带新的完整 current surface。"""
-
-    type: str = "compaction"
+    type: str = "context_window_reset"
+    window_id: str = ""
     messages_removed: int = 0
     messages_after: int = 0
-    summary_token_estimate: int = 0
     trigger: str = "token_limit"
-    archive: CompactionArchive | None = None
     replacement: list[AgentMessage]
     model_config = ConfigDict(extra="forbid")
 
@@ -138,5 +127,5 @@ type AgentEvent = (
     | ToolExecutionUpdateEvent
     | ToolExecutionEndEvent
     | ThinkingUpdateEvent
-    | CompactionEvent
+    | ContextWindowResetEvent
 )

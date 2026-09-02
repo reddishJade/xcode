@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -11,11 +11,10 @@ from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import Literal, Protocol
 
-from xcode.agent._compaction import estimate_tokens
+from xcode.agent._context_window import estimate_tokens
 from xcode.agent.messages import (
     AgentMessage,
     BranchSummaryMessage,
-    CompactionSummaryMessage,
     SystemMessage,
     ToolResultMessage,
     UserMessage,
@@ -638,7 +637,7 @@ def _block_to_text(block: ContextBlock) -> str:
 def _estimate_messages_tokens(messages: list[AgentMessage]) -> int:
     total = 0
     for msg in messages:
-        if isinstance(msg, (CompactionSummaryMessage, BranchSummaryMessage)):
+        if isinstance(msg, BranchSummaryMessage):
             total += estimate_tokens(msg.summary)
         else:
             raw = msg.content if isinstance(msg.content, str) else str(msg.content)
@@ -1159,11 +1158,9 @@ class RecentValidationCollector:
 NOTES_MAX_BYTES: int = 4 * 1024
 NOTES_MAX_FILE_BYTES: int = 64 * 1024
 _NOTES_TRUNCATED_MARKER = (
-    "<notes-truncated>Notes truncated. "
-    "Read individual files for full content.</notes-truncated>"
+    "<notes-truncated>NOTE.md truncated. Read the file for full content."
+    "</notes-truncated>"
 )
-
-_NOTES_ALLOWED_SUFFIXES: frozenset[str] = frozenset({".md", ".txt"})
 
 
 class NotesCollector:
@@ -1179,55 +1176,27 @@ class NotesCollector:
         root = input.project_root or self._project_root
         if root is None:
             return []
-        notes_dir = root / ".xcode" / "notes"
-        if not notes_dir.is_dir():
+        note_path = root / "NOTE.md"
+        if not note_path.is_file():
             return []
         try:
-            files = sorted(
-                p
-                for p in notes_dir.iterdir()
-                if p.is_file()
-                and p.suffix.lower() in _NOTES_ALLOWED_SUFFIXES
-                and p.stat().st_size <= NOTES_MAX_FILE_BYTES
-            )
-        except Exception:
-            logger.exception("NotesCollector: failed to list notes dir")
+            if note_path.stat().st_size > NOTES_MAX_FILE_BYTES:
+                return []
+            text = note_path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            logger.debug("NotesCollector: failed to read %s", note_path, exc_info=True)
             return []
-
-        parts: list[str] = []
-        total_bytes = 0
-        marker = _NOTES_TRUNCATED_MARKER
-
-        for f in files:
-            try:
-                text = f.read_text(encoding="utf-8", errors="replace").strip()
-            except OSError:
-                logger.debug("NotesCollector: failed to read %s", f, exc_info=True)
-                text = ""
-            if not text:
-                continue
-            header = f"--- {f.name} ---"
-            item = f"{header}\n{text}"
-            item_bytes = _utf8_size(item) + 1
-            if total_bytes + item_bytes > self._max_bytes:
-                remaining = self._max_bytes - total_bytes
-                if _utf8_size(marker) <= remaining:
-                    parts.append(marker)
-                break
-            parts.append(item)
-            total_bytes += item_bytes
-
-        if not parts:
+        if not text:
             return []
-        body = "\n".join(parts)
+        body = _apply_size_budget(text, self._max_bytes, _NOTES_TRUNCATED_MARKER)
 
         return [
             ContextBlock(
                 source=ContextBlockSource.NOTES,
                 target=ContextBlockTarget.USER_CONTEXT,
-                priority=ContextPriority.MEDIUM,
+                priority=ContextPriority.HIGH,
                 content=body,
-                provenance=str(notes_dir),
+                provenance=str(note_path),
                 truncated=_NOTES_TRUNCATED_MARKER in body,
                 truncation_reason=(
                     "byte_budget" if _NOTES_TRUNCATED_MARKER in body else None

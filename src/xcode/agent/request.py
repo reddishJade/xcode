@@ -13,7 +13,7 @@ from xcode.ai.providers._codec import provider_function_name
 from xcode.ai.types import StreamOptions, ToolDefinition
 
 from ._codec import convert_to_llm
-from ._compaction import estimate_tokens
+from ._context_window import estimate_tokens
 from ._hygiene import apply_request_hygiene
 from .context import (
     ContextAssembler,

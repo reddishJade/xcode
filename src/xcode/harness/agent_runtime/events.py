@@ -16,7 +16,7 @@ from xcode.ai.events import ToolCall
 from ...agent.events import (
     AgentEvent,
     AgentStartEvent,
-    CompactionEvent,
+    ContextWindowResetEvent,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
@@ -143,19 +143,19 @@ class ToolResultStructuredEvent:
 
 
 @dataclass(frozen=True)
-class CompactionData:
+class ContextWindowResetData:
+    window_id: str
     messages_removed: int
     messages_after: int
-    summary_token_estimate: int
     trigger: str
     replacement: tuple[AgentMessage, ...]
 
 
 @dataclass(frozen=True)
-class CompactionStructuredEvent:
-    type: Literal["compaction"]
+class ContextWindowResetStructuredEvent:
+    type: Literal["context_window_reset"]
     step: int
-    data: CompactionData
+    data: ContextWindowResetData
     correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
@@ -176,7 +176,7 @@ type AgentHarnessEvent = (
     | ToolUseStructuredEvent
     | ToolUpdateStructuredEvent
     | ToolResultStructuredEvent
-    | CompactionStructuredEvent
+    | ContextWindowResetStructuredEvent
     | FinalStructuredEvent
 )
 
@@ -225,8 +225,8 @@ def _translate_event(
     if isinstance(event, ToolExecutionEndEvent):
         return _translate_tool_execution_end(event, state)
 
-    if isinstance(event, CompactionEvent):
-        return _translate_compaction(event, state)
+    if isinstance(event, ContextWindowResetEvent):
+        return _translate_context_window_reset(event, state)
 
     return None
 
@@ -372,17 +372,17 @@ def _translate_tool_execution_end(
     return result_event
 
 
-def _translate_compaction(
-    event: CompactionEvent,
+def _translate_context_window_reset(
+    event: ContextWindowResetEvent,
     state: _StreamTranslationState,
-) -> CompactionStructuredEvent:
-    return CompactionStructuredEvent(
-        "compaction",
+) -> ContextWindowResetStructuredEvent:
+    return ContextWindowResetStructuredEvent(
+        "context_window_reset",
         state.step,
-        CompactionData(
+        ContextWindowResetData(
+            window_id=event.window_id,
             messages_removed=event.messages_removed,
             messages_after=event.messages_after,
-            summary_token_estimate=event.summary_token_estimate,
             trigger=event.trigger,
             replacement=tuple(event.replacement),
         ),

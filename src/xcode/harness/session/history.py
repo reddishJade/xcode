@@ -35,6 +35,31 @@ class HistoryEntry:
         return json.dumps(self.content, ensure_ascii=False, sort_keys=True)
 
 
+@dataclass(frozen=True)
+class HistoryRead:
+    """一条历史记录的可分页原文。"""
+
+    entry: HistoryEntry
+    offset: int
+    content: str
+    total_chars: int
+
+    @property
+    def next_offset(self) -> int | None:
+        next_offset = self.offset + len(self.content)
+        return next_offset if next_offset < self.total_chars else None
+
+
+@dataclass(frozen=True)
+class ContextWindowRecord:
+    """session transcript 中一次换窗事件。"""
+
+    window_id: str
+    event_message_id: str
+    trigger: str
+    created_at: str
+
+
 class SessionHistory:
     """读取当前 branch 的 lossless JSONL 历史。"""
 
@@ -87,6 +112,54 @@ class SessionHistory:
         end = min(len(branch), index + min(max(after, 0), 20) + 1)
         return branch[start:end]
 
+    def read(
+        self,
+        message_id: str,
+        *,
+        offset: int = 0,
+        max_chars: int = 8_000,
+    ) -> HistoryRead | None:
+        """按字符范围读取一条记录，不使用预览截断。"""
+        entry = next(
+            (entry for entry in self._branch() if entry.id == message_id),
+            None,
+        )
+        if entry is None:
+            return None
+        text = entry.text
+        safe_offset = min(max(offset, 0), len(text))
+        safe_limit = min(max(max_chars, 1), 20_000)
+        return HistoryRead(
+            entry=entry,
+            offset=safe_offset,
+            content=text[safe_offset : safe_offset + safe_limit],
+            total_chars=len(text),
+        )
+
+    def list_windows(self, *, limit: int = 20) -> list[ContextWindowRecord]:
+        """列出当前 branch 上已持久化的上下文窗口边界。"""
+        windows: list[ContextWindowRecord] = []
+        for entry in self._branch():
+            if entry.type != "event" or not isinstance(entry.content, dict):
+                continue
+            if entry.content.get("type") != "context_window_reset":
+                continue
+            data = entry.content.get("data")
+            if not isinstance(data, dict):
+                continue
+            window_id = str(data.get("window_id", "")).strip()
+            if not window_id:
+                continue
+            windows.append(
+                ContextWindowRecord(
+                    window_id=window_id,
+                    event_message_id=entry.id,
+                    trigger=str(data.get("trigger", "")),
+                    created_at=entry.created_at,
+                )
+            )
+        return windows[-min(max(limit, 1), 100) :]
+
     def _branch(self) -> list[HistoryEntry]:
         session_id = self.session_id
         if session_id is None:
@@ -130,29 +203,49 @@ class SessionHistory:
 
 
 def build_history_tools(history: SessionHistory) -> tuple[ToolSpec, ...]:
-    """构建当前 session 的 search/around 工具。"""
+    """构建当前 session 的窗口索引、搜索和精确读取工具。"""
 
     def handle(
         data: ToolInput,
         _on_update: Callable[[str], None] | None = None,
     ) -> str:
         operation = str(data.get("operation", "search"))
+        if operation == "list_windows":
+            windows = history.list_windows(limit=_bounded(data.get("limit"), 20, 100))
+            if not windows:
+                return "No context window transitions in the current session."
+            return "\n".join(_render_window(window) for window in windows)
         if operation == "search":
             query = str(data.get("query", "")).strip()
             if not query:
                 return "query is required for history search"
-            entries = history.search(query, limit=_bounded(data.get("limit"), 5))
+            entries = history.search(
+                query,
+                limit=_bounded(data.get("limit"), 5, 20),
+            )
+        elif operation == "read":
+            message_id = str(data.get("message_id", "")).strip()
+            if not message_id:
+                return "message_id is required for history read"
+            result = history.read(
+                message_id,
+                offset=_bounded(data.get("offset"), 0, 1_000_000_000),
+                max_chars=_bounded(data.get("max_chars"), 8_000, 20_000),
+            )
+            if result is None:
+                return "No matching history in the current session."
+            return _render_exact_read(result)
         elif operation == "around":
             message_id = str(data.get("message_id", "")).strip()
             if not message_id:
                 return "message_id is required for history around"
             entries = history.around(
                 message_id,
-                before=_bounded(data.get("before"), 3),
-                after=_bounded(data.get("after"), 3),
+                before=_bounded(data.get("before"), 3, 20),
+                after=_bounded(data.get("after"), 3, 20),
             )
         else:
-            return "operation must be one of: search, around"
+            return "operation must be one of: list_windows, search, read, around"
         if not entries:
             return "No matching history in the current session."
         return "\n\n".join(_render_entry(entry) for entry in entries)
@@ -161,30 +254,42 @@ def build_history_tools(history: SessionHistory) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="history",
             description=(
-                "Search the current session's lossless transcript or read records "
-                "around a message ID after context rebuild."
+                "List context windows, search the current session's lossless "
+                "transcript, page through one exact record, or inspect neighbors."
             ),
             input_hint=(
-                'JSON: {"operation":"search","query":"timeout","limit":5} or '
-                '{"operation":"around","message_id":"abc123","before":3,"after":3}'
+                'JSON: {"operation":"list_windows"}, '
+                '{"operation":"search","query":"timeout","limit":5}, '
+                '{"operation":"read","message_id":"abc123","offset":0,'
+                '"max_chars":8000}, or {"operation":"around",'
+                '"message_id":"abc123","before":3,"after":3}'
             ),
             handler=handle,
             schema={
                 "type": "object",
                 "properties": {
-                    "operation": {"type": "string", "enum": ["search", "around"]},
+                    "operation": {
+                        "type": "string",
+                        "enum": ["list_windows", "search", "read", "around"],
+                    },
                     "query": {"type": "string"},
                     "message_id": {"type": "string"},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 20},
                     "before": {"type": "integer", "minimum": 0, "maximum": 20},
                     "after": {"type": "integer", "minimum": 0, "maximum": 20},
+                    "offset": {"type": "integer", "minimum": 0},
+                    "max_chars": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20000,
+                    },
                 },
                 "required": ["operation"],
                 "additionalProperties": False,
             },
             prompt_snippet=(
-                "Use history search/around when a detail predates the current "
-                "durable surface replacement or compacted context."
+                "After a context reset, use list_windows/search to locate evidence, "
+                "then read for exact content. History is the source of truth."
             ),
         ),
     )
@@ -231,15 +336,32 @@ def _render_entry(entry: HistoryEntry) -> str:
     return f"[message_id={entry.id} type={entry.type} at={entry.created_at}]\n{content}"
 
 
+def _render_exact_read(result: HistoryRead) -> str:
+    next_offset = str(result.next_offset) if result.next_offset is not None else "end"
+    return (
+        f"[message_id={result.entry.id} type={result.entry.type} "
+        f"at={result.entry.created_at} offset={result.offset} "
+        f"total_chars={result.total_chars} next_offset={next_offset}]\n"
+        f"{result.content}"
+    )
+
+
+def _render_window(window: ContextWindowRecord) -> str:
+    return (
+        f"[window_id={window.window_id} event_message_id={window.event_message_id} "
+        f"trigger={window.trigger} at={window.created_at}]"
+    )
+
+
 def _tokens(text: str) -> tuple[str, ...]:
     return tuple(
         dict.fromkeys(re.findall(r"[a-z0-9_./:-]+|[\u3400-\u9fff]", text.casefold()))
     )
 
 
-def _bounded(value: object, default: int) -> int:
+def _bounded(value: object, default: int, maximum: int) -> int:
     try:
-        return min(max(int(value), 0), 20)  # type: ignore[arg-type]
+        return min(max(int(value), 0), maximum)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return default
 

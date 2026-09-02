@@ -21,7 +21,7 @@ HookEvent = Literal[
     "pre_tool",
     "post_tool",
     "on_error",
-    "on_compact",
+    "on_context_window_reset",
     "before_agent_start",
     "before_provider_request",
 ]
@@ -33,7 +33,7 @@ _HOOK_EVENTS: tuple[HookEvent, ...] = (
     "pre_tool",
     "post_tool",
     "on_error",
-    "on_compact",
+    "on_context_window_reset",
     "before_agent_start",
     "before_provider_request",
 )
@@ -87,10 +87,10 @@ class ErrorEvent:
 
 
 @dataclass(frozen=True)
-class CompactEvent:
-    """上下文压缩事件。"""
+class ContextWindowResetHookEvent:
+    """上下文窗口切换事件。"""
 
-    type: Literal["on_compact"] = "on_compact"
+    type: Literal["on_context_window_reset"] = "on_context_window_reset"
     metadata: HookMetadata = field(default_factory=dict)
     correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
@@ -121,7 +121,7 @@ type HarnessEvent = (
     PreToolEvent
     | PostToolEvent
     | ErrorEvent
-    | CompactEvent
+    | ContextWindowResetHookEvent
     | BeforeAgentStartEvent
     | BeforeProviderRequestEvent
 )
@@ -246,8 +246,11 @@ def _harness_event_from_hook(record: HookRecord) -> HarnessEvent:
             correlation=correlation,
         )
 
-    def _on_compact() -> CompactEvent:
-        return CompactEvent(metadata=metadata, correlation=correlation)
+    def _on_context_window_reset() -> ContextWindowResetHookEvent:
+        return ContextWindowResetHookEvent(
+            metadata=metadata,
+            correlation=correlation,
+        )
 
     def _before_agent_start() -> BeforeAgentStartEvent:
         return BeforeAgentStartEvent(
@@ -269,7 +272,7 @@ def _harness_event_from_hook(record: HookRecord) -> HarnessEvent:
         "pre_tool": _pre_tool,
         "post_tool": _post_tool,
         "on_error": _on_error,
-        "on_compact": _on_compact,
+        "on_context_window_reset": _on_context_window_reset,
         "before_agent_start": _before_agent_start,
         "before_provider_request": _before_provider_request,
     }
@@ -277,7 +280,10 @@ def _harness_event_from_hook(record: HookRecord) -> HarnessEvent:
     return (
         builder()
         if builder is not None
-        else CompactEvent(metadata=metadata, correlation=correlation)
+        else ContextWindowResetHookEvent(
+            metadata=metadata,
+            correlation=correlation,
+        )
     )
 
 

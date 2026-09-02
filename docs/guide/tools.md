@@ -98,4 +98,4 @@ OutputAccumulator 保留行数、字节数和最近预览。输出超过限制�
 
 工具结果的 `is_error` 驱动 watchdog 和前端状态。文件工具可以提供 `LocationRenderIntent`，写入和 patch 可以提供 `DiffRenderIntent`，Shell 提供 `TerminalRenderIntent`，子代理提供 `SubagentRenderIntent`。
 
-工具调用和结果进入 session surface；大型结果在 provider 请求前按 request hygiene 和 layered compaction 规则生成较小投影。原始 session 账本保持可恢复结构。
+工具调用和结果进入 session surface；大型结果在 provider 请求前按 request hygiene 和当前工作窗口预算生成较小投影。原始 session 账本保持可恢复结构。

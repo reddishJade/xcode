@@ -1,4 +1,4 @@
-# 会话、恢复与上下文压缩
+# 会话、恢复与上下文换窗
 
 Xcode 将 session 组织为可追加的 JSONL 事实账本，并从当前 branch 投影出模型历史、界面历史和运行状态。
 
@@ -24,7 +24,7 @@ Xcode 将 session 组织为可追加的 JSONL 事实账本，并从当前 branch
 - `inbox/inserted`、`inbox/claimed`、`inbox/discarded`：输入生命周期。
 - `provider_request`：实际 wire messages、工具定义、provider、options 和 context trace。
 - `assistant`、`tool_use`、`tool_result`：模型与工具语义事件。
-- `compaction`：压缩 replacement、generation、源 entry id 和 surface digest。
+- `context_window_reset`：新窗口 ID、触发原因、replacement、generation、源 entry id 和 surface digest。
 - `final`：回答、终止原因、metrics 和 run state。
 - `goal_state`：Goal 的条件、暂停状态和重入计数。
 - `subagent/descriptor`、`subagent/activation`、`subagent_run`：子代理身份与运行谱系。
@@ -33,7 +33,7 @@ Xcode 将 session 组织为可追加的 JSONL 事实账本，并从当前 branch
 
 ## 3. Surface 与恢复
 
-`SessionSurface` 沿当前 `head_id` 回溯 branch，再应用 inbox claim、assistant、tool use、tool result 和 compaction replacement，生成模型消息。
+`SessionSurface` 沿当前 `head_id` 回溯 branch，再应用 inbox claim、assistant、tool use、tool result 和 context-window replacement，生成模型消息。
 
 消息使用显式 `kind`/`payload` 标签编码。恢复时校验消息结构与工具配对：每个 tool call 对应一个 result，orphan result、重复 id 和未闭合调用形成恢复错误。
 
@@ -58,34 +58,24 @@ Xcode 将 session 组织为可追加的 JSONL 事实账本，并从当前 branch
 
 `ActiveRunHandle` 的状态为 running、cancelling、finishing、finished。生成结束前会关闭 step input，再 claim 最后一批输入，保证输入和结束事件顺序稳定。
 
-## 5. 自动压缩
+## 5. 上下文换窗
 
-压缩触发来源：
+换窗触发来源：
 
-- provider usage 的 prompt token 达到模型窗口减去 reserve token 的阈值。
-- 配置的 message count 或 token threshold。
-- 用户执行 `/compact`。
+- provider usage 的 prompt token 达到当前模型窗口预算。
+- provider 未返回 usage 时的本地 token 估算。
+- 配置的 message count 或绝对 token threshold。
+- 模型调用 `new_context`，或用户执行 `/new-context`。
 
-模型上下文窗口的默认比例为 `compact_trigger_ratio=0.7`；`reserve_tokens` 默认 16384。模型 profile 的 `context_window` 可以覆盖注册表窗口。
+窗口大小优先取 provider profile 的 `context_window` 覆盖；未覆盖时读取当前模型注册值。默认触发线为窗口的 95%，并且不得高于“窗口 - `reserve_tokens`”。
 
-`LayeredCompactor` 依次执行：
+`ContextWindowRollover` 不生成摘要。它重新注入启动上下文，保留已激活 skill 和当前 user 回合，并仅在新工作 surface 中裁剪过期文件读取与大工具输出。项目根 `NOTE.md` 保存执行前沿；模型主动换窗前必须先写入非空 `NOTE.md`。
 
-1. 旧 `read_file` 结果按文件路径保留最近一次。
-2. 大型工具结果按 token 压力保留头尾。
-3. 较早的工具结果压缩为短提示；最新文件读取和技能激活结果受保护。
-4. 非活动 branch 可以转换为 branch summary。
-5. 依据 `keep_recent_tokens` 与 `max_recent_messages` 保留近期消息。
-6. 切分点对齐 user/assistant turn，工具调用与结果保持同一闭合关系。
-7. 使用 LLM 生成结构化摘要；生成失败时使用结构化文本 fallback。
-8. 累积读取文件和修改文件，写入摘要的 Critical Context。
+## 6. 换窗的持久化语义
 
-摘要包含 Goal、Constraints & Preferences、Progress、Key Decisions、Next Steps 和 Critical Context。摘要中的 frozen identifiers 可以被标记并保留原文。
+换窗结果作为新的 `context_window_reset` event 追加，原始账本不改写。replacement 保存完整当前 surface、generation、source entry ids 和 SHA-256 digest；恢复时加载最新 replacement，再沿账本继续构建。
 
-## 6. 压缩的持久化语义
-
-压缩结果作为新的 `compaction` event 追加，原始账本持续存在。replacement 保存完整当前 surface、generation、source entry ids 和 SHA-256 digest；恢复时从 replacement 加载窗口，再沿账本继续构建。
-
-这让“模型窗口变小”和“运行事实持续累积”同时成立。`ContextManager` 在压缩后增加 context window id、重置动态 context baseline 和实测 prompt token。
+`history` 工具可列出窗口边界、搜索当前 branch、分页读取某条原始记录，或查看其邻近记录。因此模型的当前 context 是可丢弃工作集，session transcript 才是可检索的无损事实源。
 
 ## 7. 分支与回退
 

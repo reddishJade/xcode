@@ -23,7 +23,7 @@ xcode web --project-root /path/to/project
 
 - 顶栏：工作区、Git branch、模型、effort、session 和 plan/build/act。
 - 侧栏：新建工作台、最近工作区和 session 列表。
-- 主区：用户消息、step rail、thinking、assistant Markdown、tool cards、compaction 和 final metrics。
+- 主区：用户消息、step rail、thinking、assistant Markdown、tool cards、context-window reset 和 final metrics。
 - 底栏：usage、context、模型与 effort。
 - 审批面板：工具名、参数、决策原因、相关 transcript 和 once/session/permanent 选择。
 
@@ -65,7 +65,7 @@ xcode web --project-root /path/to/project
 - `session_reset`、`session_switched`、`workspace_switched`。
 - `pong`。
 
-`event` 内的 Agent 事件包含 `message_start`、`text_delta`、`reasoning_delta`、`assistant`、`tool_use`、`tool_update`、`tool_result`、`compaction` 和 `final`。
+`event` 内的 Agent 事件包含 `message_start`、`text_delta`、`reasoning_delta`、`assistant`、`tool_use`、`tool_update`、`tool_result`、`context_window_reset` 和 `final`。
 
 ## 5. 运行与广播
 
@@ -87,4 +87,4 @@ xcode web --project-root /path/to/project
 
 ## 7. 事件展示边界
 
-Web 事件序列化器递归处理 dataclass、Pydantic model、enum、Path 和 bytes。浏览器接收的长 transcript 与 final run state 具有长度上限；compaction 事件对 replacement 采用摘要展示。完整事实仍保留在 session JSONL 账本中。
+Web 事件序列化器递归处理 dataclass、Pydantic model、enum、Path 和 bytes。浏览器接收的长 transcript 与 final run state 具有长度上限；context-window reset 事件不在 WebSocket 中传输完整 replacement。完整事实仍保留在 session JSONL 账本中。

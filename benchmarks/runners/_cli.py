@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
-from pathlib import Path
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 
+from benchmarks.models import discover_task_files, load_task
+from benchmarks.reports.generate_report import write_report
+from benchmarks.runners._long_horizon import RunOptions, Variant, run_task
+from benchmarks.runners.progress import create_progress_reporter
 from xcode.harness.config import (
     XcodeRuntimeConfig,
     discover_runtime_config,
     load_runtime_config,
 )
-
-from benchmarks.models import discover_task_files, load_task
-from benchmarks.reports.generate_report import write_report
-from benchmarks.runners._long_horizon import RunOptions, SummaryMode, Variant, run_task
-from benchmarks.runners.progress import create_progress_reporter
 
 
 def run_variant_main(variant: Variant) -> None:
@@ -67,11 +66,6 @@ def _parser(description: str) -> argparse.ArgumentParser:
         help="write the report, then exit nonzero if a primary usage cohort is incomplete",
     )
     parser.add_argument("--temperature", type=float)
-    parser.add_argument(
-        "--summary-mode",
-        choices=("model", "deterministic"),
-        default="model",
-    )
     parser.add_argument("--keep-workspaces", action="store_true")
     parser.add_argument(
         "--no-progress",
@@ -117,7 +111,6 @@ def _run_variants(
                             repeat=repetition,
                             attempt=attempt,
                             temperature=args.temperature,
-                            summary_mode=_summary_mode(args.summary_mode),
                             keep_workspace=args.keep_workspaces,
                             progress_callback=reporter.update,
                         )
@@ -214,12 +207,6 @@ def _runtime_config(path: Path | None) -> XcodeRuntimeConfig:
     return discover_runtime_config(Path.cwd())
 
 
-def _summary_mode(value: str) -> SummaryMode:
-    if value == "deterministic":
-        return "deterministic"
-    return "model"
-
-
 def _default_output_dir() -> Path:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return Path("benchmark-results") / "long_horizon" / stamp

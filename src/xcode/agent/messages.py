@@ -71,14 +71,6 @@ class ToolResultMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CompactionSummaryMessage(BaseModel):
-    role: str = "compaction_summary"
-    summary: str = ""
-    tokens_before: int = 0
-    timestamp: int = 0
-    model_config = ConfigDict(extra="forbid")
-
-
 class BranchSummaryMessage(BaseModel):
     role: str = "branch_summary"
     summary: str = ""
@@ -92,6 +84,5 @@ type AgentMessage = (
     | UserMessage
     | AssistantMessage
     | ToolResultMessage
-    | CompactionSummaryMessage
     | BranchSummaryMessage
 )

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 import sys
 import threading
 import time
-from typing import IO, Literal, Protocol
+from dataclasses import dataclass
+from datetime import datetime
+from types import TracebackType
+from typing import IO, Literal, Protocol, Self
 
 from rich.console import Console
 from rich.progress import (
@@ -27,7 +28,7 @@ ProgressStage = Literal[
     "provider_streaming",
     "provider_finished",
     "tool_started",
-    "compaction",
+    "context_window_reset",
     "restart",
     "verification",
     "turn_completed",
@@ -53,13 +54,13 @@ class ProgressUpdate:
 class BenchmarkProgressReporter(Protocol):
     """CLI 进度展示的最小协议。"""
 
-    def __enter__(self) -> BenchmarkProgressReporter: ...
+    def __enter__(self) -> Self: ...
 
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: object | None,
+        traceback: TracebackType | None,
     ) -> None: ...
 
     def update(self, event: ProgressUpdate) -> None: ...
@@ -94,7 +95,7 @@ class RichBenchmarkProgress:
             visible=False,
         )
 
-    def __enter__(self) -> RichBenchmarkProgress:
+    def __enter__(self) -> Self:
         self._progress.start()
         return self
 
@@ -102,7 +103,7 @@ class RichBenchmarkProgress:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: object | None,
+        traceback: TracebackType | None,
     ) -> None:
         self._progress.stop()
 
@@ -165,14 +166,14 @@ class PlainBenchmarkProgress:
         self._lock = threading.RLock()
         self._last_provider_activity_log = 0.0
 
-    def __enter__(self) -> PlainBenchmarkProgress:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: object | None,
+        traceback: TracebackType | None,
     ) -> None:
         return None
 
@@ -210,14 +211,14 @@ class PlainBenchmarkProgress:
 class NullBenchmarkProgress:
     """显式关闭进度输出时使用的空实现。"""
 
-    def __enter__(self) -> NullBenchmarkProgress:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: object | None,
+        traceback: TracebackType | None,
     ) -> None:
         return None
 
@@ -256,7 +257,7 @@ def _status(event: ProgressUpdate) -> str:
         "provider_streaming": "model request active",
         "provider_finished": "model response received",
         "tool_started": "running tool",
-        "compaction": "compacting context",
+        "context_window_reset": "opening fresh context window",
         "restart": "rebuilding session",
         "verification": "running verification",
         "turn_completed": "turn completed",

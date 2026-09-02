@@ -83,8 +83,8 @@ $code-review 检查当前修改
 
 `scripts/` 和 `assets/` 记录相对路径与大小，正文加载过程只披露资源元数据。
 
-## 6. 会话、压缩与安全
+## 6. 会话、换窗与安全
 
-技能激活状态通过 `<skill-activation-state>` 标记写入工具结果。session restore 从标记恢复激活集合；compaction 保护激活 tool use 与完整 result 的配对。
+技能激活状态通过 `<skill-activation-state>` 标记写入工具结果。session restore 从标记恢复激活集合；换窗时已激活 skill 作为显式启动上下文重新注入。
 
 技能的 `allowed-tools` 属于 advisory 信息，权限 gate 继续执行。技能内容进入模型上下文后，仍遵循工具 schema、执行模式和路径边界。

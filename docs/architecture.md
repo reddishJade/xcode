@@ -104,11 +104,11 @@ context 入口。`AgentRuntimeConfig` 只保存 session inbox、取消、压缩�
 - `assistant`：最终用户可见回答；
 - `provider_request`：provider 实际收到的输入和请求指纹；
 - `assistant`、`tool_use`、`tool_result`、`final`：运行语义；
-- `compaction`：追加式压缩 epoch，原 transcript 保持不变；
+- `context_window_reset`：追加式换窗边界，原 transcript 保持不变；
 - `subagent_run`：子运行的 started/completed/failed/cancelled 生命周期。
 
-`compaction` 保存完整、类型化的 surface replacement、来源 entry IDs、generation
-和指纹。replayer 只按日志顺序应用 replacement，不读取第二份 checkpoint 状态。
+`context_window_reset` 保存完整、类型化的 surface replacement、来源 entry IDs、generation
+和指纹。replayer 只按日志顺序应用 replacement；旧窗口不生成摘要。
 只有 `inbox/claimed` 中的 typed message 会进入模型 surface；普通命令记录为
 `command` event，不会伪装成用户消息。
 
@@ -183,7 +183,7 @@ intent 保存 run 关联。child 模型失败被解析为 completed/failed/cance
 `build_app()` 是产品组合根，按顺序构造：
 
 1. 已解析配置；
-2. 共享同一 store 的 session recorder/inbox、memory、compactor 和 cancellation；
+2. 共享同一 store 的 session recorder/inbox、memory、context window state 和 cancellation；
 3. provider bundle；
 4. 本地工具、MCP、memory/history 和 subagent registry；
 5. 冻结的 `AgentComposition`、会话级 runtime services 和

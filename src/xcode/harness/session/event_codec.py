@@ -12,7 +12,7 @@ from xcode.harness.agent_runtime.events import (
     AssistantEventBlock,
     AssistantStructuredEvent,
     AssistantTextBlock,
-    CompactionStructuredEvent,
+    ContextWindowResetStructuredEvent,
     MessageStartStructuredEvent,
     ReasoningDeltaStructuredEvent,
     TextDeltaStructuredEvent,
@@ -78,11 +78,11 @@ def _event_payload(event: AgentHarnessEvent) -> object:
             ),
             "type": "tool_result",
         }
-    if isinstance(event, CompactionStructuredEvent):
+    if isinstance(event, ContextWindowResetStructuredEvent):
         return {
+            "window_id": event.data.window_id,
             "messages_removed": event.data.messages_removed,
             "messages_after": event.data.messages_after,
-            "summary_token_estimate": event.data.summary_token_estimate,
             "trigger": event.data.trigger,
             "replacement": encode_surface_messages(list(event.data.replacement)),
         }

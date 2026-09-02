@@ -1,4 +1,4 @@
-"""Compacted dict ↔ AgentMessage 编解码。"""
+"""Provider 风格 dict ↔ AgentMessage 编解码。"""
 
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ from ...agent.types import ContentBlock, TextContent, ToolCallContent
 from .result import RunState
 
 
-def messages_from_compacted_dicts(
+def messages_from_provider_dicts(
     messages: list[dict[str, Any]],
 ) -> list[AgentMessage]:
-    """将压缩后的 provider 风格消息恢复为内部消息。"""
+    """将 provider 风格消息恢复为内部消息。"""
     restored: list[AgentMessage] = []
     for item in messages:
-        message = _message_from_compacted_dict(item)
+        message = _message_from_provider_dict(item)
         if message is not None:
             restored.append(message)
     return restored
@@ -30,11 +30,11 @@ def messages_from_compacted_dicts(
 
 def messages_from_run_state(run_state: RunState) -> list[AgentMessage]:
     """从可序列化运行状态恢复模型可见消息。"""
-    return messages_from_compacted_dicts(run_state.messages)
+    return messages_from_provider_dicts(run_state.messages)
 
 
-def _message_from_compacted_dict(item: dict[str, Any]) -> AgentMessage | None:
-    """恢复单条压缩消息，未知格式保持为普通用户文本。"""
+def _message_from_provider_dict(item: dict[str, Any]) -> AgentMessage | None:
+    """恢复单条 provider 消息。"""
     role = str(item.get("role", ""))
     content = item.get("content", "")
     if role == "system":
@@ -42,16 +42,16 @@ def _message_from_compacted_dict(item: dict[str, Any]) -> AgentMessage | None:
     if role == "user":
         return UserMessage(content=_content_to_text(content))
     if role == "assistant":
-        return _assistant_from_compacted_dict(item)
+        return _assistant_from_provider_dict(item)
     if role == "tool":
         return ToolResultMessage(
             tool_call_id=str(item.get("tool_call_id", "")),
-            content=_tool_result_content_from_compacted(content),
+            content=_tool_result_content_from_provider(content),
         )
     return None
 
 
-def _assistant_from_compacted_dict(item: dict[str, Any]) -> AssistantMessage:
+def _assistant_from_provider_dict(item: dict[str, Any]) -> AssistantMessage:
     """恢复 assistant 文本和工具调用。"""
     content_blocks: list[ContentBlock] = []
     content = item.get("content")
@@ -62,13 +62,13 @@ def _assistant_from_compacted_dict(item: dict[str, Any]) -> AssistantMessage:
     tool_calls = item.get("tool_calls", [])
     if isinstance(tool_calls, list):
         for tool_call in tool_calls:
-            parsed = _tool_call_from_compacted(tool_call)
+            parsed = _tool_call_from_provider(tool_call)
             if parsed is not None:
                 content_blocks.append(parsed)
     return AssistantMessage(content=content_blocks)
 
 
-def _tool_call_from_compacted(item: object) -> ToolCallContent | None:
+def _tool_call_from_provider(item: object) -> ToolCallContent | None:
     """恢复 OpenAI 风格 tool_call。"""
     if not isinstance(item, dict):
         return None
@@ -91,7 +91,7 @@ def _tool_call_from_compacted(item: object) -> ToolCallContent | None:
     return ToolCallContent(id=tool_call_id, name=name, arguments=arguments)
 
 
-def _tool_result_content_from_compacted(content: object) -> str:
+def _tool_result_content_from_provider(content: object) -> str:
     """恢复工具结果文本。"""
     if not isinstance(content, list):
         return _content_to_text(content)
@@ -106,7 +106,7 @@ def _tool_result_content_from_compacted(content: object) -> str:
 
 
 def _content_to_text(content: object) -> str:
-    """将压缩中间格式转为稳定文本。"""
+    """将 provider 中间格式转为稳定文本。"""
     if content is None:
         return ""
     if isinstance(content, str):
