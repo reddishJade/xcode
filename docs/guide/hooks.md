@@ -11,7 +11,7 @@ Hooks 把 Agent 运行事件转换为同步回调、结构化订阅或受信任�
 | `pre_tool` | 工具执行前 | 参数变换、收紧 allow/ask/deny |
 | `post_tool` | 工具成功完成后 | 接收工具输入和输出 |
 | `on_error` | 工具或运行错误后 | 错误通知与诊断 |
-| `on_compact` | 压缩启动时 | 记录压缩触发和消息数量 |
+| `on_context_window_reset` | 换窗时 | 记录换窗触发和消息数量 |
 
 ## 2. 配置
 

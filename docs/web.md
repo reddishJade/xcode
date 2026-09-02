@@ -79,7 +79,7 @@ workspace_switched | pong
 ```
 
 `event` 即 harness 的 `AgentHarnessEvent`（`text_delta` / `reasoning_delta` /
-`tool_use` / `tool_result` / `assistant` / `compaction` / `final` 等），按
+`tool_use` / `tool_result` / `assistant` / `context_window_reset` / `final` 等），按
 `step` 号组织渲染，与 TUI 看到的语义同构。
 
 ## REST API

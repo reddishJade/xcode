@@ -599,7 +599,7 @@
               <tr>
                 <td><strong>Agent Loop</strong></td>
                 <td><code>src/xcode/agent/</code></td>
-                <td><span class="lz">主事件循环、请求组装、70% 压缩调度、工具并发读写分区调度</span><span class="le">Agent loop, request assembly, compaction scheduling & tool dispatcher</span></td>
+                <td><span class="lz">主事件循环、请求组装、上下文换窗调度、工具并发读写分区调度</span><span class="le">Agent loop, request assembly, context rollover scheduling & tool dispatcher</span></td>
               </tr>
               <tr>
                 <td><strong>AI Providers</strong></td>
@@ -898,27 +898,27 @@ xcode</code></pre>
           </a>
           <a class="pager-btn" href="#sessions">
             <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
-            <span class="pager-title"><span class="lz">会话账本与分层压缩 →</span><span class="le">Sessions & Context →</span></span>
+            <span class="pager-title"><span class="lz">会话账本与上下文换窗 →</span><span class="le">Sessions & Context →</span></span>
           </a>
         </div>
       </article>
 
       <!-- ================= 7. SESSIONS ================= -->
       <article id="sessions" class="doc-page">
-        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">核心运行机制</span><span class="le">Core Operations</span> / <span>Sessions & Compaction</span></div>
-        <h1><span class="lz">会话账本、分层压缩与快照撤销</span><span class="le">Sessions, Layered Compaction & Snapshot Undo</span></h1>
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">核心运行机制</span><span class="le">Core Operations</span> / <span>Sessions & Context Rollover</span></div>
+        <h1><span class="lz">会话账本、上下文换窗与快照撤销</span><span class="le">Sessions, Context Rollover & Snapshot Undo</span></h1>
         <p class="lead-text">
-          <span class="lz">全量事件流持久化；70% 上下文水位线分层裁剪；支持多分支分叉与文件级快照秒级撤销。</span>
-          <span class="le">Authoritative session event log, 70% threshold layered compaction, and instant file snapshot undo.</span>
+          <span class="lz">全量事件流持久化；默认在模型上下文容量的 95% 无摘要换窗；支持多分支分叉与文件级快照秒级撤销。</span>
+          <span class="le">Authoritative session event log, summary-free rollover at 95% of model context capacity, and instant file snapshot undo.</span>
         </p>
 
-        <h2><span class="lz">70% 水位线分层压缩机制 (Layered Compactor)</span><span class="le">70% Threshold Layered Compactor</span></h2>
-        <p><span class="lz">当上下文累计达到模型预留窗口的 70% 时，系统自动触发非侵入式分层压缩：</span><span class="le">When prompt size exceeds 70% of context capacity, Xcode triggers layered pruning:</span></p>
+        <h2><span class="lz">95% 水位线上下文换窗</span><span class="le">95% Context Rollover</span></h2>
+        <p><span class="lz">当上下文达到当前模型容量（或 provider profile 复写值）的 95% 时，系统直接开启干净窗口：</span><span class="le">At 95% of the active model capacity (or provider profile override), Xcode opens a fresh window:</span></p>
         <ul>
-          <li><strong>第一层：裁剪陈旧只读输出</strong> —— 移除早前轮次中大型 <code>read_file</code> 与 <code>grep_search</code> 的冗长全文；</li>
-          <li><strong>第二层：截断历史工具执行结果</strong> —— 压缩陈旧的命令标准输出，保留返回状态码与核心错误提示；</li>
-          <li><strong>第三层：生成状态 Checkpoint</strong> —— 归纳已完成的架构决策与待办任务列表并落盘快照；</li>
-          <li><strong>极速恢复</strong>：后续会话恢复直接加载 <code>Checkpoint 快照 + 原文尾部事件</code>，Token 消耗降低 60% 以上。</li>
+          <li><strong>不生成摘要</strong> —— 旧窗口不会被递归压缩成新的事实来源；</li>
+          <li><strong>完整历史留存</strong> —— session JSONL 保留原始事件，可用 <code>history</code> 精确检索与读取；</li>
+          <li><strong>显式工作状态</strong> —— 根目录 <code>NOTE.md</code> 保存跨窗口进度与关键决策；</li>
+          <li><strong>容量可复写</strong> —— provider profile 的 <code>context_window</code> 可覆盖模型注册容量并触发换窗。</li>
         </ul>
 
         <h2><span class="lz">常用会话控制指令</span><span class="le">Session Management Commands</span></h2>
@@ -933,10 +933,10 @@ xcode</code></pre>
 <span class="c"># 从当前会话的第 5 条消息分支创建全新会话</span>
 /fork 5
 
-<span class="c"># 手动触发分层压缩与快照写入</span>
-/compact
+<span class="c"># 手动开启干净上下文窗口</span>
+/new-context
 
-<span class="c"># 查看当前 Token 消耗与压缩状态</span>
+<span class="c"># 查看当前 Token 消耗与换窗状态</span>
 /context</code></pre>
         </div>
 
@@ -1200,9 +1200,9 @@ xcode</code></pre>
               </tr>
               <tr>
                 <td><code>agent</code></td>
-                <td><code>compaction_threshold</code></td>
+                <td><code>rollover_trigger_ratio</code></td>
                 <td><span class="type-tag">float</span></td>
-                <td><span class="lz">上下文压缩水位线，默认 <code>0.70</code> (70%)</span><span class="le">Compaction trigger threshold, default: 0.70</span></td>
+                <td><span class="lz">上下文换窗比例，默认 <code>0.95</code> (95%)</span><span class="le">Context rollover ratio, default: 0.95</span></td>
               </tr>
             </tbody>
           </table>
@@ -1501,8 +1501,8 @@ description: 专门用于执行大型代码库重构的指导规范与架构检�
               <tr><td><code>/undo</code></td><td><code>/undo [N]</code></td><td><span class="lz">原子回滚文件级快照修改</span><span class="le">Atomically undo file modifications</span></td></tr>
               <tr><td><code>/fork</code></td><td><code>/fork [turn_id]</code></td><td><span class="lz">从指定消息序号分支全新会话</span><span class="le">Branch new session from turn N</span></td></tr>
               <tr><td><code>/rewind</code></td><td><code>/rewind [N]</code></td><td><span class="lz">撤销最近 N 轮对话历史</span><span class="le">Rewind recent N conversational turns</span></td></tr>
-              <tr><td><code>/compact</code></td><td><code>/compact</code></td><td><span class="lz">手动触发分层上下文压缩</span><span class="le">Trigger layered context compaction</span></td></tr>
-              <tr><td><code>/context</code></td><td><code>/context</code></td><td><span class="lz">查看 Token 消耗与压缩状态</span><span class="le">Inspect token usage and compaction status</span></td></tr>
+              <tr><td><code>/new-context</code></td><td><code>/new-context</code></td><td><span class="lz">手动开启干净上下文窗口</span><span class="le">Open a fresh context window</span></td></tr>
+              <tr><td><code>/context</code></td><td><code>/context</code></td><td><span class="lz">查看 Token 消耗与换窗状态</span><span class="le">Inspect token usage and rollover status</span></td></tr>
             </tbody>
           </table>
         </div>

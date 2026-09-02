@@ -75,7 +75,7 @@ CLI / TUI / Web
        ▼
       Agent
        │
-       ├── request assembly / context / compaction
+       ├── request assembly / context / window rollover
        ├── provider stream / tool execution / watchdog
        ▼
        AI provider layer
@@ -311,7 +311,7 @@ provider 层自身使用 `ProviderRuntime` 处理临时 HTTP、连接和超时�
 
 ### 5.2 Surface 是从事实计算出的模型历史
 
-`SessionSurface` 依次应用 inbox claim、assistant 事实、tool use、tool result 和 compaction replacement，生成模型可见消息。
+`SessionSurface` 依次应用 inbox claim、assistant 事实、tool use、tool result 和 context-window reset replacement，生成模型可见消息。
 
 surface 使用带显式 `kind` 与 `payload` 的类型标签编码。解码时校验消息类型、字段和工具配对：
 
@@ -320,14 +320,14 @@ surface 使用带显式 `kind` 与 `payload` 的类型标签编码。解码时�
 - 重复 tool call id 触发 surface 错误。
 - surface 结尾保留完整的工具调用闭合关系。
 
-压缩 replacement 带有 generation、source entry ids 和 surface SHA-256。重建时验证 replacement 对应整个 branch prefix，并验证摘要生成的新 surface 指纹。
+换窗 replacement 带有 generation、source entry ids 和 surface SHA-256。重建时验证 replacement 对应整个 branch prefix，并验证新 surface 指纹。
 
 这套结构把两个时间尺度分开：
 
 - transcript 保存发生过的事实。
 - surface 保存当前模型窗口的工作投影。
 
-模型窗口可以压缩，事实账本持续追加；恢复流程重新计算当前 branch，再恢复运行状态、目标、技能和上下文检索状态。
+模型窗口可以丢弃并重开，事实账本持续追加；恢复流程重新计算当前 branch，再恢复运行状态、目标、技能和上下文检索状态。
 
 ### 5.3 Durable inbox 与 active run
 
@@ -347,7 +347,7 @@ surface 使用带显式 `kind` 与 `payload` 的类型标签编码。解码时�
 - assistant
 - tool use
 - tool result
-- compaction
+- context window reset
 - final
 - provider request
 - goal state
@@ -542,7 +542,7 @@ Linux 之外的环境使用本地 `SubprocessShell`；语义权限边界仍由 T
 - `pre_tool`
 - `post_tool`
 - `on_error`
-- `on_compact`
+- `on_context_window_reset`
 
 `SignalHookManager` 同时支持同步注册、结构化订阅和后台 hook。后台队列把外部观察从主循环中分离，`drain_background` 提供受控收尾点。
 
@@ -627,7 +627,7 @@ CLI 提供：
 - `/plan`、`/build`、`/act` 模式切换。
 - `/model`、`/thinking`、`/effort` 动态模型控制。
 - `/sessions`、`/resume`、`/continue`、`/fork`、`/clone`、`/tree`、`/rewind`。
-- `/compact`、`/context`、`/goal`、`/permissions`、`/hooks`、`/mcp`、`/memory`。
+- `/new-context`、`/context`、`/goal`、`/permissions`、`/hooks`、`/mcp`、`/memory`。
 - `/tool` 直接工具入口和 `!command` shell 快捷入口。
 - `$skill` 显式技能激活与 `@file` 文件引用。
 - Tab 补全、参数暗示、实时 Markdown、推理预览和工具摘要。
@@ -650,7 +650,7 @@ Web server 通过 REST 提供 info、stats、model、git branches、workspaces�
 - 工作区切换重新装配完整 app，再替换旧 app。
 - 历史会话提供只读 transcript 展示，并支持恢复后继续对话。
 
-Web 前端直接消费结构化 event type，把 text_delta、reasoning_delta、tool_use、tool_update、tool_result、compaction 和 final 映射为步骤、思考面板、工具卡片和终止统计。
+Web 前端直接消费结构化 event type，把 text_delta、reasoning_delta、tool_use、tool_update、tool_result、context_window_reset 和 final 映射为步骤、思考面板、工具卡片和终止统计。
 
 ---
 
@@ -661,7 +661,7 @@ Web 前端直接消费结构化 event type，把 text_delta、reasoning_delta、
 配置对象覆盖：
 
 - provider profiles、模型、base URL、thinking、effort、context window。
-- Agent max steps、compaction、reserve token、tool workers、watchdog。
+- Agent max steps、自动换窗、reserve token、tool workers、watchdog。
 - request hygiene。
 - shell 与 tools。
 - skills、prompt modules、instruction sources。

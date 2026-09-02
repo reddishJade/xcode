@@ -126,7 +126,7 @@ xcode --resume
 | `/steer` | 模式控制 | 注入实时引导 |
 | `/queue` | 模式控制 | 设置忙时消息策略，或在当前 run 后排队新 run |
 | `/help` | 信息工具 | 显示帮助 |
-| `/compact` | 会话回滚 | 手动触发上下文压缩 |
+| `/new-context` | 上下文窗口 | 关闭当前工作窗口并开启新窗口，不生成摘要 |
 | `/rewind [N]` | 会话回滚 | 撤销最近 N 轮交互 |
 | `/undo [N\|--list]` | 会话回滚 | 文件级撤销（快照恢复） |
 | `/clear` | 会话生命周期 | 开始新会话 |
@@ -160,20 +160,20 @@ xcode --resume
 ## 核心能力
 
 - **结构化 Agent 循环** — `CodingAgentHarness` 消费 provider 流式事件，统一处理 text、reasoning、tool_use、tool_result 和 final answer。
-- **可回放事实账本** — session 以 append-only 事件记录用户输入、provider 实际请求、工具语义、compaction epoch、子代理生命周期和最终回答。
+- **可回放事实账本** — session 以 append-only 事件记录用户输入、provider 实际请求、工具语义、换窗边界、子代理生命周期和最终回答。
 - **三执行模式** — `plan`（只读）、`build`（自动执行并由独立 reviewer 审批边界动作）、`act`（边界动作询问用户），规则引擎按 findLast 覆盖权限。
 - **核心工具闭环** — 内置文件读写编辑、glob/grep/bash/subagent/webfetch/websearch/question/todowrite 等工具。`edit_file` 依赖 read-before-edit SHA256 指纹校验。
 - **工具并发分区** — 只读且并发安全的工具并行执行；写操作、高风险命令保持串行。
 - **权限与审计** — `PermissionEngine` 统一执行工具权限判定、自动/人工审批和输出脱敏；`JsonlAuditLogger` 记录审计日志；Build 中需要 review 的 shell 动作不会暂停询问用户。
 - **Linux shell sandbox** — Agent 的 `bash` 默认在 bubblewrap 中运行：项目与 `/tmp` 可写、宿主其余路径只读、凭据路径不可读、网络隔离；审批策略与隔离策略彼此独立。
-- **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果；compact 后按 session 写入 checkpoint，resume 使用 checkpoint + 原文 tail 重建上下文。
+- **上下文换窗与恢复** — `ContextWindowRollover` 直接开启无摘要的新工作窗口；`history` 检索无损 session 账本，项目根 `NOTE.md` 保存当前执行前沿。
 - **REPL 会话管理** — `/slash` 命令支持 plan/build/act、会话分支、回退、undo（快照恢复）、模型切换、config 管理、session transcript 落盘。
 - **TUI 全屏终端** — 基于 `prompt-toolkit` 的类 VSCode 全屏交互界面。
 - **浏览器工作台** — `xcode web` 启动 FastAPI + WebSocket 服务，单页面前端实时渲染结构化事件流：步骤脊柱、thinking、工具卡片与审批弹窗；会话账本可通过 REST 回放。
 - **Subagent 委托** — `subagent` 单入口委派子任务，持久化 batch/run 谱系与终态；子 agent 共享项目目录，并继承父 agent 的权限门控。
 - **类型化工具呈现** — terminal、diff、location 和 subagent 由工具产生结构化 intent，REPL/TUI 共享投影逻辑。
 - **MCP 协议** — 基于官方 Python SDK 连接本地 stdio server，自动发现 `.xcode/mcp_config.json` 并注册 `mcp__{server}__{tool}` 动态工具。
-- **记忆系统** — 项目根 `MEMORY.md` + 用户级 `~/.xcode/memory/` 是可审查的长期事实源；Agent 通过 BM25 工具按需检索。
+- **记忆系统** — `MEMORY.md` 与用户级 memory 保存稳定长期事实，`NOTE.md` 保存短期工作状态，无损 session history 是最终事实源。
 - **外部 Hook** — 可配置事件驱动的外部命令 hooks（git 前置检查、自定义通知等）。
 
 ---
@@ -183,17 +183,17 @@ xcode --resume
 稳定工具默认注册：`read_file`、`write_file`、`edit_file`、`apply_patch`、
 `glob_files`、`find_files`、`list_dir`、`grep_search`、`websearch`、
 `webfetch`、`question`、`bash`、`search_tools`、`subagent`、`todowrite`、
-`history`、`search_memory`。发现 skill 时注册 `load_skill`；存在 MCP 配置时
+`history`、`search_memory`、`new_context`。发现 skill 时注册 `load_skill`；存在 MCP 配置时
 注册 `mcp__{server}__{tool}` 动态工具。
 
 `search_memory` 是只读、低风险的 BM25 检索工具。运行时不会在每轮自动
 注入检索结果；resume/rebuild 才会在独立预算内注入项目与用户记忆。长期
 记忆只保存用户规则、架构决定和经过验证的跨 session 事实，当前进度与
-下一步动作由 `.xcode/checkpoints/<session-id>/checkpoint.md` 负责。
+下一步动作由项目根 `NOTE.md` 负责。
 
-`history` 只读取当前 session 的当前分支：`search` 按关键词定位旧消息，
-`around` 按 message id 读取原文邻域。compact 后的 checkpoint 滚动更新，
-旧 checkpoint 是下一轮摘要的权威基线；退化摘要不会覆盖已有可用状态。
+`history` 只读取当前 session 的当前分支：`list_windows` 列换窗边界，
+`search` 按关键词定位旧记录，`read` 分页读取某条完整原文，
+`around` 读取 message id 的原文邻域。history 是无损事实源，不依赖递归摘要。
 
 ---
 
@@ -233,7 +233,7 @@ provider。权限提示和 shell 效果分析用于帮助用户了解并确认�
 | Layer | 路径 | 职责 |
 |---|---|---|
 | `ai/` | `src/xcode/ai/` | 多 provider LLM API：OpenAI-compatible 基类 + DeepSeek/ChatGLM/MiMo 适配器，流式传输、缓存、thinking |
-| `agent/` | `src/xcode/agent/` | Agent loop 合约：消息/事件类型、上下文压缩、工具执行分区、watchdog、provider 抽象 |
+| `agent/` | `src/xcode/agent/` | Agent loop 合约：消息/事件类型、上下文换窗、工具执行分区、watchdog、provider 抽象 |
 | `harness/` | `src/xcode/harness/` | 运行时配置、session 事实账本、权限/审计、MCP、skill、记忆、hooks 和本地执行协议 |
 | `coding_agent/` | `src/xcode/coding_agent/` | 产品工具装配：文件读写编辑、glob/grep/bash/subagent/webfetch/websearch 等 |
 | `cli/` | `src/xcode/cli/` | REPL UI、TUI、slash command 系统、setup wizard、配置管理 |
@@ -247,9 +247,8 @@ provider。权限提示和 shell 效果分析用于帮助用户了解并确认�
 
 ### 长程任务 benchmark
 
-`benchmarks/` 提供上下文压缩消融实验：对同一模型、温度和任务，配对运行
-完整历史 baseline 与启用 `LayeredCompactor`、checkpoint、resume 的 Xcode
-配置。任务成功由测试进程判定，状态保持由文件哈希、禁止路径和验证命令判定。
+`benchmarks/` 提供无摘要换窗消融实验：对同一模型、温度和任务，配对运行
+完整历史 baseline 与在声明边界开启 fresh context 的 Xcode 配置。任务成功由测试进程判定，状态保持由文件哈希、禁止路径和验证命令判定。
 
 ```powershell
 uv run python -m benchmarks.runners.run_ablation benchmarks/tasks/long_horizon `

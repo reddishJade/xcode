@@ -507,8 +507,8 @@
           <span class="le">An extensible<br><em>Python coding-agent</em> runtime harness</span>
         </h1>
         <p class="hero-lede reveal" style="transition-delay:.16s">
-          <span class="lz">围绕结构化事件流、执行模式、路径安全、工具审批、审计脱敏、上下文压缩、REPL/TUI 会话与记忆系统构建的可测试 Coding Agent 运行时骨架。</span>
-          <span class="le">A testable coding-agent runtime harness built around structured event streams, execution modes, path safety, tool approval, audited redaction, context compaction, REPL/TUI sessions, and a memory system.</span>
+          <span class="lz">围绕结构化事件流、执行模式、路径安全、工具审批、审计脱敏、上下文换窗、REPL/TUI 会话与记忆系统构建的可测试 Coding Agent 运行时骨架。</span>
+          <span class="le">A testable coding-agent runtime harness built around structured event streams, execution modes, path safety, tool approval, audited redaction, context rollover, REPL/TUI sessions, and a memory system.</span>
         </p>
         <div class="hero-actions reveal" style="transition-delay:.24s">
           <a class="btn btn-primary" href="#install"><span class="lz">快速开始</span><span class="le">Quick Start</span></a>
@@ -576,8 +576,8 @@
         </article>
         <article class="feature reveal">
           <span class="feature-num">05</span>
-          <h3><span class="lz">上下文压缩与会话恢复</span><span class="le">Compaction & session resume</span></h3>
-          <p><span class="lz">LayeredCompactor 裁剪过期读取与旧工具结果，按 session 写 checkpoint；resume 以 checkpoint + 原文 tail 重建上下文。</span><span class="le">LayeredCompactor trims stale reads and old tool results into per-session checkpoints; resume rebuilds context from checkpoint plus the original tail.</span></p>
+          <h3><span class="lz">上下文换窗与会话恢复</span><span class="le">Context rollover & session resume</span></h3>
+          <p><span class="lz">窗口默认在模型容量的 95% 自动重开，不生成摘要；完整历史保留为可检索事实，NOTE.md 保存跨窗口工作状态。</span><span class="le">Windows roll over at 95% of the model capacity without summaries; searchable history remains the source of truth and NOTE.md carries working state across windows.</span></p>
         </article>
         <article class="feature reveal">
           <span class="feature-num">06</span>
@@ -788,7 +788,7 @@ xcode -p "..."       <span class="code-comment"># 单发提问</span></code></pr
           <div class="arch-name">agent/</div>
           <div class="arch-desc">
             <h4><span class="lz">Agent 循环合约</span><span class="le">Agent loop contracts</span></h4>
-            <p><span class="lz">消息/事件类型、上下文压缩、工具执行分区、watchdog。</span><span class="le">Message/event types, context compaction, tool partitioning, watchdog.</span></p>
+            <p><span class="lz">消息/事件类型、上下文换窗、工具执行分区、watchdog。</span><span class="le">Message/event types, context rollover, tool partitioning, watchdog.</span></p>
           </div>
         </div>
         <div class="arch-row">
@@ -818,8 +818,8 @@ xcode -p "..."       <span class="code-comment"># 单发提问</span></code></pr
       <div class="bench-grid">
         <div class="bench-card reveal">
           <span class="bench-tag warn"><span class="lz">真实 API 调用</span><span class="le">Real API calls</span></span>
-          <h3><span class="lz">长程任务压缩消融</span><span class="le">Long-horizon compaction</span></h3>
-          <p><span class="lz">同模型、同温度、同任务配对运行：完整历史 baseline vs 启用 LayeredCompactor + checkpoint 的 Xcode 配置。测试进程判定任务成功，文件哈希与禁止路径判定状态保持。</span><span class="le">Paired runs with the same model, temperature, and task: full-history baseline vs Xcode with LayeredCompactor and checkpoints. Task success is judged by a test process; state retention is judged by file hashes and forbidden paths.</span></p>
+          <h3><span class="lz">长程任务换窗消融</span><span class="le">Long-horizon rollover</span></h3>
+          <p><span class="lz">同模型、同温度、同任务配对运行：不换窗 baseline vs 启用无摘要换窗的 Xcode 配置。测试进程判定任务成功，文件哈希与禁止路径判定状态保持。</span><span class="le">Paired runs with the same model, temperature, and task: a no-rollover baseline vs Xcode with summary-free context rollover. Task success is judged by tests; state retention is judged by file hashes and forbidden paths.</span></p>
           <div class="code-card" style="box-shadow:none; margin-bottom:0">
             <div class="code-header">
               <span class="code-lang">Shell</span>
@@ -871,8 +871,8 @@ xcode -p "..."       <span class="code-comment"># 单发提问</span></code></pr
             <span class="le">Xcode Official Developer Documentation Hub</span>
           </h3>
           <p>
-            <span class="lz">涵盖系统设计哲学、五层架构契约、Linux Bubblewrap 命名空间沙箱、只读并发调度与写串行屏障、70% 水位线分层压缩、Durable Session 子代理以及全套 Slash 命令与配置手册。</span>
-            <span class="le">Comprehensive reference covering design philosophy, 5-layer architecture, Linux bubblewrap sandbox, side-effect-aware concurrency, layered compaction, durable subagents, slash commands, and configuration.</span>
+            <span class="lz">涵盖系统设计哲学、五层架构契约、Linux Bubblewrap 命名空间沙箱、只读并发调度与写串行屏障、无摘要上下文换窗、Durable Session 子代理以及全套 Slash 命令与配置手册。</span>
+            <span class="le">Comprehensive reference covering design philosophy, 5-layer architecture, Linux bubblewrap sandbox, side-effect-aware concurrency, summary-free context rollover, durable subagents, slash commands, and configuration.</span>
           </p>
           <div class="docs-hero-cta">
             <a class="btn btn-primary" style="padding:12px 28px; font-size:15px; border-radius:10px;" href="docs.html">

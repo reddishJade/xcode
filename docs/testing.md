@@ -18,7 +18,7 @@
 
 - ToolOutput -> AgentToolResult -> ToolResultMessage；
 - runtime event -> session codec -> replay；
-- compaction replacement -> current surface -> restart；
+- context-window replacement -> current surface -> restart；
 - provider 实际请求 -> `provider_request` envelope；
 - composition generation -> run snapshot -> `provider_request.composition_id`；
 - subagent lifecycle -> parent session ledger；

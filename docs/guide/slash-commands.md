@@ -13,7 +13,7 @@ REPL 和 TUI 使用统一命令注册表。输入 `/` 后按 Tab 可以补全命
 | `/queue` | `/queue steer\|followup\|interrupt\|MESSAGE` | 设置 busy policy，或排入 follow-up |
 | `/verbose` | `/verbose normal\|verbose\|debug` | 设置输出详细程度 |
 | `/debug` | `/debug on\|off` | 切换 debug 输出 |
-| `/compact` | `/compact` | 立即执行完整上下文压缩并保存 replacement |
+| `/new-context` | `/new-context` | 立即关闭当前工作窗口并开启新窗口，不生成摘要 |
 | `/goal` | `/goal CONDITION\|pause\|resume\|clear` | 设置、暂停、恢复或清除独立验收目标 |
 
 `/steer` 适合当前 run 的即时纠偏；`/queue` 的 follow-up 在当前 run 完成后启动新的 run。忙时普通输入默认按 `busy_mode` 处理。
@@ -76,7 +76,7 @@ REPL 和 TUI 使用统一命令注册表。输入 `/` 后按 Tab 可以补全命
 
 | 命令 | 用法 | 作用 |
 | --- | --- | --- |
-| `/exit` | `/exit` | 保存当前摘要并退出 |
+| `/exit` | `/exit` | 保存当前 session 并退出 |
 | `/quit` | `/quit` | `/exit` 的隐藏 alias |
 | `/revert` | `/revert [N\|--list]` | `/undo` 的隐藏 alias |
 

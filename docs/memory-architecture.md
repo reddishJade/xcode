@@ -10,15 +10,18 @@ behavioral scores to individual notes.
 
 1. **Transcript** is the lossless history. Session JSONL keeps user messages,
    assistant messages, and tool events.
-2. **Session surface** is the current task state. Each compact cycle appends a
-   typed replacement event to the session transcript.
-3. **Project memory** is `MEMORY.md`. It contains only durable project rules,
+2. **Session surface** is the disposable model working set. Each rollover
+   appends a typed replacement event without rewriting older entries.
+3. **Working note** is project-root `NOTE.md`. It contains the current goal,
+   confirmed decisions, verification status, unresolved issues, and next action.
+4. **Project memory** is `MEMORY.md`. It contains only durable project rules,
    architecture decisions, and verified cross-session facts.
-4. **User memory** is `~/.xcode/memory/MEMORY.md`. It contains durable
+5. **User memory** is `~/.xcode/memory/MEMORY.md`. It contains durable
    cross-project preferences.
 
-The layers have different jobs. Current progress and next actions belong in the
-session surface, never in project or user memory.
+The layers have different jobs. Current progress and next actions belong in
+`NOTE.md`, never in project or user memory. The transcript remains the source
+of truth when a note needs evidence.
 
 ## Runtime flow
 
@@ -28,27 +31,30 @@ The system prompt tells the agent where memory lives and when to use it. It does
 not automatically inject search results on every turn. The agent calls the
 read-only `search_memory` tool when prior project knowledge may matter.
 
-### Compact
+### Rollover
 
-For models with a known context window, Xcode starts a new compact cycle at
-roughly 70% utilization instead of waiting for the window reserve boundary.
-The compactor keeps a verbatim recent tail and writes its full structured
-summary as a new session surface. The event records the complete replacement,
-the source entry IDs, a monotonic generation, and a stable fingerprint.
+Xcode uses the provider profile's `context_window` override when present;
+otherwise it reads the active model's registered context window. Automatic
+rollover begins at 95% or at the output-reserve boundary, whichever comes
+first. The old window is closed without a summary. Startup context, activated
+skills, and the active user turn form the new working set. The typed event
+records the replacement, source entry IDs, a monotonic generation, and a stable
+fingerprint.
 
 ### Resume
 
 Xcode restores:
 
 ```text
-latest durable surface replacement
+latest durable context-window replacement
 + transcript entries appended after the replacement
++ NOTE.md working state
 + budgeted project and user memory
 ```
 
 The latest final event already contains the structured coding run state. Resume
-restores its execution mode and todo list after rebuilding message history, so
-unfinished work does not depend on the compacted summary mentioning every todo.
+restores its execution mode and todo list after rebuilding message history.
+Older exact evidence remains available through `history` list/search/read/around.
 
 ## Invariants
 
@@ -75,11 +81,10 @@ Do not add these without evidence from real long-running task failures:
 
 The implemented surface/history cycle is the product boundary:
 
-- compact updates the previous structured state instead of repeatedly
-  summarizing it as ordinary conversation;
+- rollover never summarizes the previous window;
 - malformed or tool-unbalanced replacements are rejected;
-- `history search/around` retrieves exact details older than the rebuild
-  boundary.
+- `history list_windows/search/read/around` retrieves exact details older than
+  the current working set.
 
 Early background extraction and automatic project-memory promotion are not
 planned. They require evidence from real long-running task failures and must
