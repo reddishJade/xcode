@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import re
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, cast
 
 StateCheckKind = Literal[
@@ -33,13 +33,13 @@ class TurnSpec:
     """一个可重复的用户交互轮次。"""
 
     prompt: str
-    compact_before: bool = False
+    rollover_before: bool = False
     restart_after: bool = False
 
 
 @dataclass(frozen=True)
 class StateCheckSpec:
-    """压缩或恢复后的确定性状态事实。"""
+    """换窗或恢复后的确定性状态事实。"""
 
     id: str
     kind: StateCheckKind
@@ -49,11 +49,11 @@ class StateCheckSpec:
 
 
 @dataclass(frozen=True)
-class CompactionSpec:
-    """任务使用的压缩尾部预算。"""
+class ContextWindowSpec:
+    """任务使用的换窗回合兜底预算。"""
 
-    max_recent_messages: int = 6
-    keep_recent_tokens: int = 4_000
+    fallback_recent_messages: int = 6
+    fallback_recent_tokens: int = 4_000
 
 
 @dataclass(frozen=True)
@@ -66,7 +66,7 @@ class LongHorizonTask:
     manifest_path: Path
     workspace: Path
     turns: tuple[TurnSpec, ...]
-    compaction: CompactionSpec
+    context_window: ContextWindowSpec
     success_command: CommandSpec
     state_checks: tuple[StateCheckSpec, ...]
 
@@ -83,7 +83,7 @@ def load_task(path: Path) -> LongHorizonTask:
             "id",
             "description",
             "workspace",
-            "compaction",
+            "context_window",
             "turns",
             "success_command",
             "state_checks",
@@ -120,7 +120,7 @@ def load_task(path: Path) -> LongHorizonTask:
         manifest_path=manifest_path,
         workspace=workspace,
         turns=turns,
-        compaction=_load_compaction(data.get("compaction", {})),
+        context_window=_load_context_window(data.get("context_window", {})),
         success_command=success_command,
         state_checks=state_checks,
     )
@@ -147,13 +147,13 @@ def _load_turn(value: object, index: int) -> TurnSpec:
     data = _mapping(value, f"turns[{index}]")
     _reject_unknown(
         data,
-        {"prompt", "compact_before", "restart_after"},
+        {"prompt", "rollover_before", "restart_after"},
         f"turns[{index}]",
     )
     return TurnSpec(
         prompt=_text(data.get("prompt"), f"turns[{index}].prompt"),
-        compact_before=_boolean(
-            data.get("compact_before", False), f"turns[{index}].compact_before"
+        rollover_before=_boolean(
+            data.get("rollover_before", False), f"turns[{index}].rollover_before"
         ),
         restart_after=_boolean(
             data.get("restart_after", False), f"turns[{index}].restart_after"
@@ -209,22 +209,24 @@ def _load_state_check(value: object, index: int) -> StateCheckSpec:
     )
 
 
-def _load_compaction(value: object) -> CompactionSpec:
-    data = _mapping(value, "compaction")
+def _load_context_window(value: object) -> ContextWindowSpec:
+    data = _mapping(value, "context_window")
     _reject_unknown(
         data,
-        {"max_recent_messages", "keep_recent_tokens"},
-        "compaction",
+        {"fallback_recent_messages", "fallback_recent_tokens"},
+        "context_window",
     )
-    max_recent_messages = _positive_integer(
-        data.get("max_recent_messages", 6), "compaction.max_recent_messages"
+    fallback_recent_messages = _positive_integer(
+        data.get("fallback_recent_messages", 6),
+        "context_window.fallback_recent_messages",
     )
-    keep_recent_tokens = _positive_integer(
-        data.get("keep_recent_tokens", 4_000), "compaction.keep_recent_tokens"
+    fallback_recent_tokens = _positive_integer(
+        data.get("fallback_recent_tokens", 4_000),
+        "context_window.fallback_recent_tokens",
     )
-    return CompactionSpec(
-        max_recent_messages=max_recent_messages,
-        keep_recent_tokens=keep_recent_tokens,
+    return ContextWindowSpec(
+        fallback_recent_messages=fallback_recent_messages,
+        fallback_recent_tokens=fallback_recent_tokens,
     )
 
 
@@ -237,7 +239,7 @@ def _load_command(value: object, field: str) -> CommandSpec:
         raise ValueError(f"{field}.argv must not be empty")
     timeout = data.get("timeout_seconds", 120)
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-        raise ValueError(f"{field}.timeout_seconds must be a number")
+        raise TypeError(f"{field}.timeout_seconds must be a number")
     if timeout <= 0:
         raise ValueError(f"{field}.timeout_seconds must be positive")
     return CommandSpec(argv=argv, timeout_seconds=float(timeout))
@@ -268,13 +270,13 @@ def _safe_relative_path(value: str) -> str:
 
 def _mapping(value: object, field: str) -> dict[str, Any]:
     if not isinstance(value, dict):
-        raise ValueError(f"{field} must be an object")
+        raise TypeError(f"{field} must be an object")
     return {str(key): item for key, item in value.items()}
 
 
 def _list(value: object, field: str) -> list[object]:
     if not isinstance(value, list):
-        raise ValueError(f"{field} must be an array")
+        raise TypeError(f"{field} must be an array")
     return value
 
 
@@ -286,7 +288,7 @@ def _text(value: object, field: str) -> str:
 
 def _integer(value: object, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{field} must be an integer")
+        raise TypeError(f"{field} must be an integer")
     return value
 
 
@@ -299,7 +301,7 @@ def _positive_integer(value: object, field: str) -> int:
 
 def _boolean(value: object, field: str) -> bool:
     if not isinstance(value, bool):
-        raise ValueError(f"{field} must be a boolean")
+        raise TypeError(f"{field} must be a boolean")
     return value
 
 

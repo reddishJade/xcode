@@ -1,9 +1,9 @@
-"""压缩与恢复后的状态事实评估。"""
+"""换窗与恢复后的状态事实评估。"""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from benchmarks.evaluators.test_result import run_command

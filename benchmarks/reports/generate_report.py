@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 import json
+from collections import defaultdict
 from pathlib import Path
 from statistics import fmean, median
 from typing import Any
 
 _VARIANTS = ("baseline", "xcode")
-_PHASES = ("pre_compaction", "post_compaction", "post_resume")
+_PHASES = ("pre_rollover", "post_rollover", "post_resume")
 
 
 def load_records(paths: list[Path]) -> list[dict[str, Any]]:
@@ -166,11 +166,11 @@ def render_markdown(summary: dict[str, Any]) -> str:
     cohorts = summary["cohorts"]
     correctness_cohort = _cohort(cohorts.get("correctness_pairs"))
     usage_cohort = _cohort(cohorts.get("complete_usage_pairs"))
-    pre_cohort = _cohort(cohorts.get("pre_compaction_usage_pairs"))
-    post_cohort = _cohort(cohorts.get("post_compaction_usage_pairs"))
+    pre_cohort = _cohort(cohorts.get("pre_rollover_usage_pairs"))
+    post_cohort = _cohort(cohorts.get("post_rollover_usage_pairs"))
     resume_cohort = _cohort(cohorts.get("post_resume_usage_pairs"))
     lines = [
-        "# Long-horizon compaction ablation",
+        "# Long-horizon context-window rollover ablation",
         "",
         (
             f"Runs: {summary['runs']} attempt records, "
@@ -198,19 +198,19 @@ def render_markdown(summary: dict[str, Any]) -> str:
             change_kind="percent",
         ),
         _row(
-            "Pre-compaction input tokens",
+            "Pre-rollover input tokens",
             pre_cohort,
-            baseline.get("pre_compaction_input_tokens_mean"),
-            xcode.get("pre_compaction_input_tokens_mean"),
-            changes.get("pre_compaction_input_token_reduction"),
+            baseline.get("pre_rollover_input_tokens_mean"),
+            xcode.get("pre_rollover_input_tokens_mean"),
+            changes.get("pre_rollover_input_token_reduction"),
             change_kind="percent",
         ),
         _row(
-            "Post-compaction input tokens",
+            "Post-rollover input tokens",
             post_cohort,
-            baseline.get("post_compaction_input_tokens_mean"),
-            xcode.get("post_compaction_input_tokens_mean"),
-            changes.get("post_compaction_input_token_reduction"),
+            baseline.get("post_rollover_input_tokens_mean"),
+            xcode.get("post_rollover_input_tokens_mean"),
+            changes.get("post_rollover_input_token_reduction"),
             change_kind="percent",
         ),
         _row(
@@ -276,8 +276,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         ),
         "",
         (
-            "Post-compaction includes the compaction-summary request; post-resume "
-            "starts on the turn after the declared restart boundary."
+            "Rollover creates no summary request; post-rollover starts at the "
+            "declared fresh-window boundary, and post-resume starts after restart."
         ),
         "Each metric excludes only pairs whose provider usage is incomplete for that metric.",
         "Task success is determined by the task verification command, not model self-report.",
@@ -397,7 +397,6 @@ def _validate_pair_controls(pair: dict[str, dict[str, Any]]) -> None:
         "model",
         "temperature",
         "execution_mode",
-        "summary_mode",
         "baseline_commit",
     ):
         if baseline.get(field) != xcode.get(field):

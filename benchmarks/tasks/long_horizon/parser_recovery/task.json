@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "id": "parser-recovery",
-  "description": "Fix a configuration parser across ten evidence-driven turns, compact once, restart, and preserve compatibility constraints.",
+  "description": "Fix a configuration parser across ten evidence-driven turns, open a fresh context window once, restart, and preserve compatibility constraints.",
   "workspace": "workspace",
-  "compaction": {
-    "max_recent_messages": 6,
-    "keep_recent_tokens": 2000
+  "context_window": {
+    "fallback_recent_messages": 6,
+    "fallback_recent_tokens": 2000
   },
   "turns": [
     {
@@ -28,7 +28,7 @@
     },
     {
       "prompt": "Re-read TASK.md and verify that src/public_api.py and docs/compatibility.md still satisfy the no-edit constraint. Do not undo a correct parser fix.",
-      "compact_before": true,
+      "rollover_before": true,
       "restart_after": true
     },
     {
