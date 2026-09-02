@@ -307,13 +307,14 @@ def render_memory_protocol(manager: MemoryManager) -> str:
     return "\n".join(
         (
             "<long-horizon-memory>",
-            "Session continuity is maintained by durable surface replacements.",
+            "NOTE.md is the explicit working-state index for the current task.",
+            "The lossless session transcript is the source of truth for exact history.",
             f"Project memory: {manager.memory_file}",
             f"User memory: {manager.user_memory_file}",
             "Use search_memory before asking the user to repeat prior decisions.",
             (
-                "Use history search/around for exact details shadowed by the current "
-                "surface."
+                "Use history list_windows/search/read/around for exact details from "
+                "older context windows."
             ),
             (
                 "Only persist durable user rules, architecture decisions, and verified "

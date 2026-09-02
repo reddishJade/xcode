@@ -90,6 +90,9 @@ class PlanPolicy:
             "webfetch",
             "websearch",
             "question",
+            "history",
+            "search_memory",
+            "new_context",
         }
     )
 
@@ -205,6 +208,8 @@ def build_default_mode_rulesets(
         Rule(action="load_skill", effect="allow"),
         Rule(action="subagent", effect="allow"),
         Rule(action="search_memory", effect="allow"),
+        Rule(action="history", effect="allow"),
+        Rule(action="new_context", effect="allow"),
         Rule(action="mcp__*", effect="allow"),
         Rule(action="mcp_tool_search", effect="allow"),
     )
@@ -231,6 +236,8 @@ def build_default_mode_rulesets(
             effect="allow",
             resource_pattern=".xcode/plans/*.md",
         ),
+        Rule(action="write_file", effect="allow", resource_pattern="NOTE.md"),
+        Rule(action="edit_file", effect="allow", resource_pattern="NOTE.md"),
     )
     if project_root is not None:
         plan_pattern = (project_root.resolve() / ".xcode" / "plans" / "*.md").as_posix()
@@ -244,6 +251,16 @@ def build_default_mode_rulesets(
                 action="edit_file",
                 effect="allow",
                 resource_pattern=plan_pattern,
+            ),
+            Rule(
+                action="write_file",
+                effect="allow",
+                resource_pattern=(project_root.resolve() / "NOTE.md").as_posix(),
+            ),
+            Rule(
+                action="edit_file",
+                effect="allow",
+                resource_pattern=(project_root.resolve() / "NOTE.md").as_posix(),
             ),
         )
     return {

@@ -7,9 +7,9 @@
 
 from __future__ import annotations
 
+import platform
 from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
-import platform
 from pathlib import Path
 from threading import Lock
 
@@ -17,12 +17,12 @@ from xcode.ai.events import ToolCall
 from xcode.ai.providers.base import ModelProvider
 
 from ...agent.agent import Agent
+from ...agent.context_manager import ContextManager
 from ...agent.messages import (
     AgentMessage,
     SystemMessage,
     UserMessage,
 )
-from ...agent.context_manager import ContextManager
 from ...agent.types import ApprovalCallback, ToolSpec
 from ..observability import HookRecord, RuntimeCorrelation
 from ..security.approval import ApprovalPolicy, ApprovalsReviewer
@@ -106,8 +106,8 @@ class AgentHarness:
         gate_runtime = runtime.gate
         self.project_root = runtime.project_root
         self._runtime = runtime
-        self.compactor = runtime.compactor
-        self._compact_controller = runtime.compact_controller
+        self.context_rollover = runtime.context_rollover
+        self._context_window_controller = runtime.context_window_controller
         self.cancellation_token = runtime.cancellation_token or CancellationToken()
         supplied_gate = runtime.gate_instance
         self._correlation = (
@@ -356,9 +356,10 @@ class AgentHarness:
         """返回 durable inbox 是否存在需要启动的新输入。"""
         return self._run_controller.has_waking_input()
 
-    def request_compaction(self) -> None:
-        if self._compact_controller is not None:
-            self._compact_controller.request()
+    def request_context_window(self) -> bool:
+        if self._context_window_controller is None:
+            return False
+        return self._context_window_controller.request("manual")
 
     def clear_history(self) -> None:
         self._context_manager.clear()
@@ -509,11 +510,12 @@ class AgentHarness:
             provider=provider,
             gate=self._gate,
             registry=active_registry,
-            compactor=self.compactor,
-            manual_compact_requested=(
-                self._compact_controller.consume if self._compact_controller else None
+            context_rollover=self.context_rollover,
+            requested_rollover=(
+                self._context_window_controller.consume
+                if self._context_window_controller
+                else None
             ),
-            compact_controller=self._compact_controller,
             last_prompt_tokens=self._context_manager.token_usage.last_prompt_tokens,
             get_last_prompt_tokens=lambda: (
                 self._context_manager.token_usage.last_prompt_tokens

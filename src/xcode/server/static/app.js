@@ -400,10 +400,10 @@
       return;
     }
 
-    if (type === "compaction") {
+    if (type === "context_window_reset") {
       systemNote(
-        "压缩",
-        `上下文已分层压缩：移除 ${data.messages_removed} 条消息，当前 ${data.messages_after} 条（触发：${data.trigger}）`
+        "换窗",
+        `已开启新上下文窗口 ${data.window_id || ""}：移除 ${data.messages_removed} 条消息，当前 ${data.messages_after} 条（触发：${data.trigger}）`
       );
       return;
     }
@@ -1004,8 +1004,8 @@
         systemNote("工具", `${inner.data?.name || "tool"} — ${String(inner.data?.input ?? "")}`.slice(0, 300));
       } else if (inner.type === "tool_result") {
         systemNote("结果", `${inner.data?.status || "ok"} ${inner.data?.tool_use_id || ""}`.slice(0, 200));
-      } else if (inner.type === "compaction") {
-        systemNote("压缩", `生成 ${inner.data?.generation || "?"} · ${inner.data?.messages_after ?? "?"} 条消息`);
+      } else if (inner.type === "context_window_reset") {
+        systemNote("换窗", `窗口 ${inner.data?.window_id || "?"} · ${inner.data?.messages_after ?? "?"} 条消息`);
       }
     }
     scrollToBottom(true);

@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from ._compaction import estimate_message_tokens
+from ._context_window import estimate_message_tokens
 from ._hygiene import repair_tool_pairing
 from .context import ContextState
 from .messages import AgentMessage
@@ -34,11 +34,11 @@ class ContextTokenUsage:
 
 
 @dataclass
-class ContextCompactionState:
-    """压缩与 context window 生命周期状态。"""
+class ContextWindowState:
+    """context window 生命周期状态。"""
 
     context_window_id: int = 0
-    compaction_count: int = 0
+    reset_count: int = 0
     last_reason: str | None = None
     last_messages_before: int = 0
     last_messages_after: int = 0
@@ -62,7 +62,7 @@ class ContextManager:
     context_state: ContextState = field(default_factory=ContextState)
     history_version: int = 0
     token_usage: ContextTokenUsage = field(default_factory=ContextTokenUsage)
-    compaction: ContextCompactionState = field(default_factory=ContextCompactionState)
+    context_window: ContextWindowState = field(default_factory=ContextWindowState)
     prompt_cache: PromptCacheMetadata = field(default_factory=PromptCacheMetadata)
     provider_usage: dict[str, int] = field(default_factory=dict)
 
@@ -99,23 +99,23 @@ class ContextManager:
         self.history_version += 1
         self.token_usage.estimated_prompt_tokens = estimate_message_tokens(self.history)
 
-    def complete_compaction(
+    def complete_rollover(
         self,
         messages: Sequence[AgentMessage],
         *,
         reason: str = "token_limit",
         before_messages: int | None = None,
     ) -> list[AgentMessage]:
-        """提交压缩结果、开启新的 context window 并重置 world state。"""
+        """提交新活动窗口并重置窗口级动态状态。"""
         before = len(self.history) if before_messages is None else before_messages
         replacement = self.replace_history(messages)
         self.context_state.reset()
         self.token_usage.last_prompt_tokens = None
-        self.compaction.context_window_id += 1
-        self.compaction.compaction_count += 1
-        self.compaction.last_reason = reason
-        self.compaction.last_messages_before = before
-        self.compaction.last_messages_after = len(replacement)
+        self.context_window.context_window_id += 1
+        self.context_window.reset_count += 1
+        self.context_window.last_reason = reason
+        self.context_window.last_messages_before = before
+        self.context_window.last_messages_after = len(replacement)
         return replacement
 
     def clear(self) -> None:
@@ -123,8 +123,8 @@ class ContextManager:
         self.context_state.reset()
         self.history_version += 1
         self.token_usage = ContextTokenUsage()
-        self.compaction = ContextCompactionState(
-            context_window_id=self.compaction.context_window_id + 1
+        self.context_window = ContextWindowState(
+            context_window_id=self.context_window.context_window_id + 1
         )
         self.provider_usage.clear()
         self.prompt_cache = PromptCacheMetadata()

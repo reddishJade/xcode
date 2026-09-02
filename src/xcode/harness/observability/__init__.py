@@ -19,7 +19,7 @@ from .external_hooks import (
 from .hooks import (
     BeforeAgentStartEvent,
     BeforeProviderRequestEvent,
-    CompactEvent,
+    ContextWindowResetHookEvent,
     ErrorEvent,
     HarnessEvent,
     HookManager,
@@ -34,7 +34,7 @@ __all__ = [
     "AuditRecord",
     "BeforeAgentStartEvent",
     "BeforeProviderRequestEvent",
-    "CompactEvent",
+    "ContextWindowResetHookEvent",
     "ErrorEvent",
     "EventCorrelation",
     "ExternalHookDiagnostic",

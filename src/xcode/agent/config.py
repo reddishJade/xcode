@@ -111,32 +111,6 @@ class AgentLoopTurnUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-# ── 压缩指令 ──
-
-
-type CompactPriority = Literal[
-    "architecture_decision",
-    "modified_file",
-    "verification_status",
-    "todo",
-    "tool_output",
-]
-
-
-class CompactInstructions(BaseModel):
-    priorities: list[CompactPriority] = Field(
-        default_factory=lambda: [
-            "architecture_decision",
-            "modified_file",
-            "verification_status",
-            "todo",
-            "tool_output",
-        ]
-    )
-    frozen_identifiers: list[str] = Field(default_factory=list)
-    model_config = ConfigDict(extra="forbid")
-
-
 # ── Callable type aliases（引用本模块上下文类型）──
 
 
@@ -152,9 +126,11 @@ type CompletionVerifier = Callable[[list[AgentMessage]], Awaitable[str | None]]
 
 # ── Callable type aliases（原 hooks.py）──
 
-type ArchiveWriter = Callable[[list[AgentMessage]], str | None]
-type ShouldCompactHook = Callable[[list[AgentMessage]], bool]
-type CompactHook = Callable[[list[AgentMessage]], list[AgentMessage]]
+type ContextWindowResetReason = Literal["token_limit", "manual", "model"]
+type RolloverDecisionHook = Callable[
+    [list[AgentMessage]], ContextWindowResetReason | None
+]
+type ContextWindowRolloverHook = Callable[[list[AgentMessage]], list[AgentMessage]]
 type IsToolProductiveHook = Callable[
     [list[ToolCallContent], list[ToolResultMessage]], bool
 ]
@@ -199,10 +175,8 @@ class AgentLoopConfig(BaseModel):
     )  # 豁免重复检测的工具名集合
     max_consecutive_idle_steps: int = 4  # 连续 4 次工具调用无产出则终止
 
-    should_compact: ShouldCompactHook | None = None
-    compact: CompactHook | None = None
-    compact_instructions: CompactInstructions | None = None
-    archive_writer: ArchiveWriter | None = None
+    rollover_decision: RolloverDecisionHook | None = None
+    rollover_context: ContextWindowRolloverHook | None = None
 
     is_tool_productive: IsToolProductiveHook | None = None
     before_provider_request: BeforeProviderRequestHook | None = None

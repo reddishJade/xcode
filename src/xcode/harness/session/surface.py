@@ -11,7 +11,6 @@ from xcode.agent.messages import (
     AgentMessage,
     AssistantMessage,
     BranchSummaryMessage,
-    CompactionSummaryMessage,
     SystemMessage,
     ToolResultMessage,
     UserMessage,
@@ -40,7 +39,6 @@ _MESSAGE_TYPES = {
     "user": UserMessage,
     "assistant": AssistantMessage,
     "tool_result": ToolResultMessage,
-    "compaction_summary": CompactionSummaryMessage,
     "branch_summary": BranchSummaryMessage,
 }
 
@@ -136,27 +134,27 @@ def project_session_surface(records: list[SessionEntry]) -> SessionSurface:
             messages.append(claimed[0])
             event_assistant_texts.clear()
             continue
-        if event_type == "compaction":
+        if event_type == "context_window_reset":
             if not isinstance(data, dict) or "replacement" not in data:
                 raise InvalidSessionSurfaceError(
-                    "compaction event is missing a typed surface replacement"
+                    "context window event is missing a typed surface replacement"
                 )
             source_entry_ids = data.get("source_entry_ids")
             expected_source_ids = [item.id for item in records[:record_index]]
             if source_entry_ids != expected_source_ids:
                 raise InvalidSessionSurfaceError(
-                    "compaction source entry IDs do not match the branch prefix"
+                    "context window source entry IDs do not match the branch prefix"
                 )
             messages = decode_surface_messages(data["replacement"])
             expected_digest = data.get("surface_sha256")
             if expected_digest != surface_digest(messages):
                 raise InvalidSessionSurfaceError(
-                    "compaction surface fingerprint does not match replacement"
+                    "context window surface fingerprint does not match replacement"
                 )
             raw_generation = data.get("generation")
             if not isinstance(raw_generation, int) or raw_generation <= generation:
                 raise InvalidSessionSurfaceError(
-                    "compaction surface generation must increase"
+                    "context window surface generation must increase"
                 )
             generation = raw_generation
             replacement_entry_id = record.id
@@ -232,8 +230,6 @@ def _message_kind(message: AgentMessage) -> str:
         return "assistant"
     if isinstance(message, ToolResultMessage):
         return "tool_result"
-    if isinstance(message, CompactionSummaryMessage):
-        return "compaction_summary"
     return "branch_summary"
 
 

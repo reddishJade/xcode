@@ -198,25 +198,21 @@ class XcodeApp:
             return ()
         return self.external_hook_runner.diagnostics()
 
-    def record_compaction(
+    def record_context_window_reset(
         self,
         *,
-        summary: str,
+        window_id: str,
         messages_before: int,
         messages_after: int,
-        tokens_before: int,
-        tokens_after: int,
         replacement: list[AgentMessage],
     ) -> str:
         recorder = self.session_recorder
         if recorder is None:
             raise RuntimeError("session recorder is not configured")
-        return recorder.record_compaction(
-            summary=summary,
+        return recorder.record_context_window_reset(
+            window_id=window_id,
             messages_before=messages_before,
             messages_after=messages_after,
-            tokens_before=tokens_before,
-            tokens_after=tokens_after,
             replacement=replacement,
         )
 
@@ -263,7 +259,7 @@ def build_app(
         sessions_dir=sessions_dir,
     )
 
-    # 使用共享的 MemoryManager 实例，确保 compactor 和 agent 使用同一实例
+    # 使用共享的 MemoryManager 实例，确保所有记忆工具使用同一事实源。
     memory_manager = infra.memory_manager
 
     providers = build_provider_bundle(
@@ -296,6 +292,7 @@ def build_app(
         memory_manager=memory_manager,
         session_history=infra.session_history,
         todo_state=todo_state,
+        context_window_controller=infra.context_window_controller,
     )
 
     auto_approval_callback = None
@@ -312,11 +309,6 @@ def build_app(
         closers = (*closers, auto_reviewer.close)
 
     fallback_provider = providers.llms.get("fallback")
-    # 为 LayeredCompactor 接入 LLM 驱动的摘要生成，替代纯规则 fallback
-    from xcode.harness.agent_runtime.compaction import build_compact_summarize_fn
-
-    infra.compactor.summarize_fn = build_compact_summarize_fn(providers.llm)
-
     agent = build_agent(
         project_root=project_root,
         llm=providers.llm,
@@ -328,8 +320,8 @@ def build_app(
         session_inbox=infra.session_inbox,
         contextual_state=infra.contextual_state,
         shell_spec=shell_spec,
-        compactor=infra.compactor,
-        compact_controller=infra.compact_controller,
+        context_rollover=infra.context_rollover,
+        context_window_controller=infra.context_window_controller,
         cancellation_token=infra.cancellation_token,
         fallback_provider=fallback_provider,
         skill_registry=skill_registry,

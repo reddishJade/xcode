@@ -9,7 +9,6 @@ import orjson
 from xcode.agent.messages import (
     AgentMessage,
     AssistantMessage,
-    BranchSummaryMessage,
     SystemMessage,
     ToolResultMessage,
     UserMessage,
@@ -25,7 +24,6 @@ from xcode.agent.types import (
     ToolResultContent,
 )
 
-COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
 BRANCH_SUMMARY_PREFIX = "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n"
 SUMMARY_SUFFIX = "\n</summary>"
 
@@ -47,23 +45,12 @@ def _convert_one(m: AgentMessage) -> dict[str, Any]:
     if isinstance(m, ToolResultMessage):
         return _convert_tool_result(m)
 
-    if isinstance(m, BranchSummaryMessage):
-        return {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": BRANCH_SUMMARY_PREFIX + m.summary + SUMMARY_SUFFIX,
-                }
-            ],
-        }
-
     return {
         "role": "user",
         "content": [
             {
                 "type": "text",
-                "text": COMPACTION_SUMMARY_PREFIX + m.summary + SUMMARY_SUFFIX,
+                "text": BRANCH_SUMMARY_PREFIX + m.summary + SUMMARY_SUFFIX,
             }
         ],
     }

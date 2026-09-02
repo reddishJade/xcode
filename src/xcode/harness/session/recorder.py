@@ -6,7 +6,11 @@ from collections.abc import Mapping
 from typing import Protocol
 
 from xcode.agent.messages import AgentMessage
-from xcode.harness.agent_runtime.events import AgentHarnessEvent, FinalStructuredEvent
+from xcode.harness.agent_runtime.events import (
+    AgentHarnessEvent,
+    ContextWindowResetStructuredEvent,
+    FinalStructuredEvent,
+)
 
 from .event_codec import SESSION_EVENT_SCHEMA_VERSION, encode_session_event
 from .subagent_runs import (
@@ -23,7 +27,7 @@ _DURABLE_EVENT_TYPES = frozenset(
         "assistant",
         "tool_use",
         "tool_result",
-        "compaction",
+        "context_window_reset",
         "final",
     }
 )
@@ -74,10 +78,10 @@ class SessionRecorder:
         if event.type not in _DURABLE_EVENT_TYPES:
             return
         encoded = encode_session_event(event)
-        if event.type == "compaction":
+        if isinstance(event, ContextWindowResetStructuredEvent):
             data = encoded.get("data")
             if not isinstance(data, dict):
-                raise TypeError("compaction event data must be an object")
+                raise TypeError("context window event data must be an object")
             replacement = list(event.data.replacement)
             data.update(self._surface_metadata(replacement))
         self.store.append("event", encoded)
@@ -90,14 +94,12 @@ class SessionRecorder:
         self.store.append("assistant", text)
         self.store.update_summary()
 
-    def record_compaction(
+    def record_context_window_reset(
         self,
         *,
-        summary: str,
+        window_id: str,
         messages_before: int,
         messages_after: int,
-        tokens_before: int,
-        tokens_after: int,
         replacement: list[AgentMessage],
     ) -> str:
         """追加一次完整 surface replacement，不修改既有 transcript。"""
@@ -106,15 +108,13 @@ class SessionRecorder:
             "event",
             {
                 "schema_version": SESSION_EVENT_SCHEMA_VERSION,
-                "type": "compaction",
+                "type": "context_window_reset",
                 "step": 0,
                 "data": {
+                    "window_id": window_id,
                     "trigger": "manual",
-                    "summary": summary,
                     "messages_before": messages_before,
                     "messages_after": messages_after,
-                    "tokens_before": tokens_before,
-                    "tokens_after": tokens_after,
                     "replacement": encode_surface_messages(replacement),
                     **metadata,
                 },
@@ -132,7 +132,7 @@ class SessionRecorder:
             for entry in branch
             if entry.type == "event"
             and isinstance(entry.content, dict)
-            and entry.content.get("type") == "compaction"
+            and entry.content.get("type") == "context_window_reset"
         )
         return {
             "generation": generation,

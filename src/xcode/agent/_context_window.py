@@ -1,4 +1,4 @@
-"""Token 估算和压缩触发判断。"""
+"""上下文窗口 token 估算与换窗触发判断。"""
 
 from __future__ import annotations
 
@@ -7,13 +7,7 @@ from collections.abc import Mapping, Sequence
 
 import tiktoken
 
-from xcode.agent.messages import (
-    AgentMessage,
-    AssistantMessage,
-    SystemMessage,
-    ToolResultMessage,
-    UserMessage,
-)
+from xcode.agent.messages import AgentMessage, AssistantMessage, BranchSummaryMessage
 from xcode.agent.types import TextContent, ThinkingContent, ToolCallContent
 
 _ENCODING_CACHE: dict[str, tiktoken.Encoding] = {}
@@ -30,15 +24,15 @@ def estimate_tokens(text: str) -> int:
     try:
         encoding = _get_encoding()
         return max(1, len(encoding.encode(text)))
-    except (KeyError, RuntimeError, TypeError, ValueError):
+    except (KeyError, RuntimeError, TypeError, UnicodeError, ValueError):
         return max(1, len(text.encode("utf-8")) // 3)
 
 
 def estimate_message_tokens(messages: Sequence[AgentMessage]) -> int:
     total = 0
-    for msg in messages:
-        if isinstance(msg, AssistantMessage):
-            for block in msg.content:
+    for message in messages:
+        if isinstance(message, AssistantMessage):
+            for block in message.content:
                 if isinstance(block, TextContent):
                     total += estimate_tokens(block.text)
                 elif isinstance(block, ThinkingContent):
@@ -47,8 +41,10 @@ def estimate_message_tokens(messages: Sequence[AgentMessage]) -> int:
                     total += estimate_tokens(
                         json.dumps(block.arguments or {}, default=str)
                     )
-        elif isinstance(msg, (SystemMessage, UserMessage, ToolResultMessage)):
-            content = msg.content
+        elif isinstance(message, BranchSummaryMessage):
+            total += estimate_tokens(message.summary)
+        else:
+            content = message.content
             if isinstance(content, str):
                 total += estimate_tokens(content)
             else:
@@ -58,31 +54,21 @@ def estimate_message_tokens(messages: Sequence[AgentMessage]) -> int:
     return total
 
 
-def should_compact_token_aware(
+def should_rollover_token_aware(
     messages: Sequence[AgentMessage],
     *,
     last_prompt_tokens: int | None = None,
-    fallback_threshold: int = 32000,
-    compact_threshold: int = 0,
-    compact_token_threshold: int = 0,
-    reserve_tokens: int = 16384,
+    fallback_threshold: int = 32_000,
+    message_threshold: int = 0,
+    token_threshold: int = 0,
 ) -> bool:
+    """优先使用 provider 用量，静态估算只作为兜底。"""
     if last_prompt_tokens is not None:
-        trigger = fallback_threshold
-        from xcode.ai.models import get_model_context_window
-
-        window = get_model_context_window(model_name=None) if False else None
-        if window is not None and reserve_tokens > 0:
-            trigger = window - reserve_tokens
-        return last_prompt_tokens >= trigger
-
-    if compact_threshold > 0 and len(messages) >= compact_threshold:
+        return last_prompt_tokens >= fallback_threshold
+    if message_threshold > 0 and len(messages) >= message_threshold:
         return True
-
-    if compact_token_threshold > 0:
-        estimated = estimate_message_tokens(messages)
-        return estimated >= compact_token_threshold
-
+    if token_threshold > 0:
+        return estimate_message_tokens(messages) >= token_threshold
     return False
 
 

@@ -65,7 +65,7 @@ def _trim_event(payload: dict[str, Any]) -> dict[str, Any]:
             raw = data.get(key)
             if isinstance(raw, str) and len(raw) > _TRUNCATE_LONG_TEXT:
                 data[key] = raw[:_TRUNCATE_LONG_TEXT] + "\n…[truncated]"
-    if event_type == "compaction":
+    if event_type == "context_window_reset":
         data["replacement"] = []
     if event_type == "final":
         messages = data.get("messages")

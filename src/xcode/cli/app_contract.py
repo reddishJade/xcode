@@ -69,7 +69,7 @@ class ReplAgent(Protocol):
 
     def restore_run_state_metadata(self, payload: object) -> None: ...
 
-    def request_compaction(self) -> None: ...
+    def request_context_window(self) -> bool: ...
 
     def set_goal(self, condition: str) -> None: ...
 
@@ -134,13 +134,11 @@ class ReplApp(ModelControlApp, ToolRegistryApp, Protocol):
 
     def hook_diagnostics(self) -> tuple[ExternalHookDiagnostic, ...]: ...
 
-    def record_compaction(
+    def record_context_window_reset(
         self,
         *,
-        summary: str,
+        window_id: str,
         messages_before: int,
         messages_after: int,
-        tokens_before: int,
-        tokens_after: int,
         replacement: list[AgentMessage],
     ) -> str: ...

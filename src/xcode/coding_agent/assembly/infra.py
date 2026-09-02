@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
-from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
+from xcode.harness.agent_runtime.context_window import (
+    ContextWindowController,
+    ContextWindowRollover,
+)
 from xcode.harness.config import XcodeRuntimeConfig, resolve_config_path
 from xcode.harness.memory import MemoryManager
 from xcode.harness.session import SessionHistory, SessionInbox, SessionStore
@@ -17,8 +20,8 @@ from xcode.harness.session.recorder import SessionRecorder
 class SharedInfra:
     contextual_state: ContextualRetrievalState
     cancellation_token: CancellationToken
-    compact_controller: CompactController
-    compactor: LayeredCompactor
+    context_window_controller: ContextWindowController
+    context_rollover: ContextWindowRollover
     memory_manager: MemoryManager
     session_history: SessionHistory
     session_inbox: SessionInbox
@@ -32,7 +35,7 @@ def build_shared_infra(
 ) -> SharedInfra:
     contextual_state = ContextualRetrievalState(project_root)
     cancellation_token = CancellationToken()
-    compact_controller = CompactController()
+    context_window_controller = ContextWindowController()
 
     memory_manager = MemoryManager(project_root)
 
@@ -49,10 +52,9 @@ def build_shared_infra(
     else:
         transcript_dir = project_root / ".xcode" / "sessions"
 
-    compactor = LayeredCompactor(
-        transcript_dir=transcript_dir,
-        max_recent_messages=runtime_config.agent.max_recent_messages,
-        keep_recent_tokens=runtime_config.agent.keep_recent_tokens,
+    context_rollover = ContextWindowRollover(
+        fallback_recent_messages=runtime_config.agent.fallback_recent_messages,
+        fallback_recent_tokens=runtime_config.agent.fallback_recent_tokens,
     )
     session_history = SessionHistory(transcript_dir)
     session_recorder = SessionRecorder(
@@ -62,8 +64,8 @@ def build_shared_infra(
     return SharedInfra(
         contextual_state=contextual_state,
         cancellation_token=cancellation_token,
-        compact_controller=compact_controller,
-        compactor=compactor,
+        context_window_controller=context_window_controller,
+        context_rollover=context_rollover,
         memory_manager=memory_manager,
         session_history=session_history,
         session_inbox=session_inbox,

@@ -63,10 +63,10 @@ def replay_session(
         restore_contextual_state(contextual_state, records)
     if surface.generation > 0:
         agent.set_resumed_notice(
-            "This long-running session was rebuilt from its latest durable "
-            "surface replacement plus the verbatim transcript tail. Continue "
-            "from the recorded next action without asking the user to restate "
-            "the goal."
+            "This session resumed in its latest context window. NOTE.md contains "
+            "explicit working state and the lossless transcript is authoritative. "
+            "Use history for older exact details instead of asking the user to "
+            "restate them."
         )
     else:
         agent.set_resumed_notice(

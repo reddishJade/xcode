@@ -9,7 +9,7 @@ import pytest
 from xcode.agent.messages import (
     AgentMessage,
     AssistantMessage,
-    CompactionSummaryMessage,
+    SystemMessage,
     ToolResultMessage,
     UserMessage,
 )
@@ -52,7 +52,7 @@ def _replacement_event(
         "event",
         {
             "schema_version": 2,
-            "type": "compaction",
+            "type": "context_window_reset",
             "step": 2,
             "data": {
                 "generation": generation,
@@ -120,7 +120,7 @@ def test_surface_message_codec_round_trips_tool_pairs() -> None:
 
 def test_projection_applies_latest_replacement_then_verbatim_tail() -> None:
     replacement: list[AgentMessage] = [
-        CompactionSummaryMessage(summary="completed setup"),
+        SystemMessage(content='<context-window-reset id="window-2">'),
         UserMessage(content="keep this exact constraint"),
     ]
     records = [
@@ -136,7 +136,7 @@ def test_projection_applies_latest_replacement_then_verbatim_tail() -> None:
     assert surface.generation == 1
     assert surface.replacement_entry_id == "c1"
     assert [type(message) for message in surface.messages] == [
-        CompactionSummaryMessage,
+        SystemMessage,
         UserMessage,
         UserMessage,
         AssistantMessage,
@@ -155,7 +155,7 @@ def test_projection_rejects_untyped_or_unbalanced_replacement() -> None:
                 _entry(
                     "c1",
                     "event",
-                    {"type": "compaction", "data": {"summary": "legacy"}},
+                    {"type": "context_window_reset", "data": {}},
                     None,
                 )
             ]
@@ -204,7 +204,7 @@ class _Store:
 
 def test_replay_uses_durable_surface_without_external_checkpoint() -> None:
     replacement: list[AgentMessage] = [
-        CompactionSummaryMessage(summary="durable current state"),
+        SystemMessage(content='<context-window-reset id="window-2">'),
         UserMessage(content="continue migration"),
     ]
     records = [
@@ -216,4 +216,4 @@ def test_replay_uses_durable_surface_without_external_checkpoint() -> None:
     replay_session(agent, cast(Any, _Store(records)))
 
     assert agent.loaded == replacement
-    assert "surface replacement" in agent.notice
+    assert "latest context window" in agent.notice

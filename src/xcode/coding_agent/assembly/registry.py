@@ -17,6 +17,10 @@ from xcode.coding_agent.tools.subagent import (
     build_subagent_tools,
 )
 from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
+from xcode.harness.agent_runtime.context_window import (
+    ContextWindowController,
+    build_new_context_tool,
+)
 from xcode.harness.agent_runtime.subagents import SubagentSessionManager
 from xcode.harness.config import XcodeRuntimeConfig
 from xcode.harness.execution_env import Shell
@@ -144,6 +148,7 @@ def _extend_registry_with_features(
     runtime_config: XcodeRuntimeConfig,
     memory_manager: Any | None = None,
     session_history: Any | None = None,
+    context_window_controller: ContextWindowController | None = None,
 ) -> tuple[ToolSpec, ...]:
     from xcode.harness.mcp import build_mcp_tools
 
@@ -159,6 +164,8 @@ def _extend_registry_with_features(
         from xcode.harness.session import build_history_tools
 
         registry += build_history_tools(session_history)
+    if context_window_controller is not None:
+        registry += build_new_context_tool(context_window_controller, project_root)
     return registry
 
 
@@ -174,6 +181,7 @@ def build_tool_registry(
     memory_manager: Any | None = None,
     session_history: Any | None = None,
     todo_state: SessionTodoState | None = None,
+    context_window_controller: ContextWindowController | None = None,
 ) -> tuple[
     tuple[ToolSpec, ...],
     ShellSpec,
@@ -211,6 +219,7 @@ def build_tool_registry(
         runtime_config,
         memory_manager=memory_manager,
         session_history=session_history,
+        context_window_controller=context_window_controller,
     )
 
     child_registry = _build_child_registry(

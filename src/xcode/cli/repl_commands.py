@@ -5,7 +5,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import questionary
 
@@ -417,12 +417,12 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
-def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
-    """手动触发上下文压缩，立即执行完整压缩管线并显示结构化摘要。"""
-    from xcode.agent._compaction import estimate_message_tokens
+def cmd_new_context(cmd: str, ctx: CommandContext) -> bool:
+    """关闭当前模型上下文并立即切换到无摘要的新窗口。"""
+    from xcode.agent._context_window import estimate_message_tokens
     from xcode.harness.agent_runtime.agent_helpers import to_dict
     from xcode.harness.agent_runtime.message_codec import (
-        messages_from_compacted_dicts,
+        messages_from_provider_dicts,
     )
 
     agent = getattr(ctx.app, "agent", None)
@@ -435,17 +435,16 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     if not callable(history_messages):
         print("Agent does not expose history.")
         return False
-    before_msgs = cast(list[AgentMessage], history_messages())
+    before_msgs = cast(Callable[[], list[AgentMessage]], history_messages)()
     if not before_msgs:
-        print("No messages to compact.")
+        print("No active context to replace.")
         return False
 
     before_tokens = estimate_message_tokens(before_msgs)
 
-    # 2) 检查是否需要压缩
-    compactor = getattr(agent, "compactor", None)
-    if compactor is None:
-        print("No compactor configured.")
+    rollover = getattr(agent, "context_rollover", None)
+    if not callable(rollover):
+        print("Context-window rollover is not configured.")
         return False
 
     load_history = getattr(agent, "load_history", None)
@@ -453,70 +452,32 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
         print("Agent does not support history replacement.")
         return False
 
-    # 3) 立即运行压缩
-    dict_messages: list[dict[str, Any]] = [to_dict(m) for m in before_msgs]
-    compacted_dicts: list[dict[str, Any]] = cast(Callable, compactor)(dict_messages)
-    after_msgs = messages_from_compacted_dicts(compacted_dicts)
-
-    # 4) 提取结构化摘要
-    summary_text = _extract_compact_summary(compacted_dicts)
+    dict_messages = [to_dict(message) for message in before_msgs]
+    next_window = cast(
+        Callable[..., list[dict[str, object]]],
+        rollover,
+    )(dict_messages, preserve_active_turn=False)
+    after_msgs = messages_from_provider_dicts(next_window)
     after_tokens = estimate_message_tokens(after_msgs)
 
-    # 5) 替换 agent 历史
-    cast(Callable, load_history)(after_msgs)
+    cast(Callable[[list[AgentMessage]], None], load_history)(after_msgs)
 
-    # 6) 追加新的上下文 epoch，原始 transcript 保持不变
-    ctx.app.record_compaction(
-        summary=summary_text or "",
+    window_id = str(getattr(rollover, "last_window_id", "") or "")
+    if not window_id:
+        raise RuntimeError("context rollover did not produce a window id")
+    ctx.app.record_context_window_reset(
+        window_id=window_id,
         messages_before=len(before_msgs),
         messages_after=len(after_msgs),
-        tokens_before=before_tokens,
-        tokens_after=after_tokens,
         replacement=after_msgs,
     )
 
-    # 7) 打印结构化摘要
-    saved = before_tokens - after_tokens
-    print("\n [compaction]\n")
-    print(f" Compacted from {before_tokens:,} tokens")
-    print()
-    if summary_text:
-        # 去除 [Compressed] 前缀，打印清晰的摘要
-        clean = summary_text
-        if clean.startswith("[Compressed]"):
-            clean = clean[len("[Compressed]") :].strip()
-        # 按行打印，每行不超过终端宽度
-        for line in clean.splitlines():
-            stripped = line.rstrip()
-            if stripped:
-                print(f" {stripped}")
-            else:
-                print()
-    else:
-        print(" (no summary extracted)")
-    print()
     print(
-        " \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-    )
-    print(
-        f" Context compacted: {len(list(before_msgs))} messages \u2192 {len(list(after_msgs))} messages"
-        f" ({before_tokens:,} \u2192 {after_tokens:,} tokens, saved {saved:,})"
+        f"Fresh context {window_id}: {len(before_msgs)} messages \u2192 "
+        f"{len(after_msgs)} messages ({before_tokens:,} \u2192 "
+        f"{after_tokens:,} estimated tokens). No summary was generated."
     )
     return False
-
-
-def _extract_compact_summary(messages: list[dict[str, Any]]) -> str | None:
-    """从压缩后的消息列表中提取结构化摘要文本。"""
-    for msg in messages:
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-        if (
-            role == "user"
-            and isinstance(content, str)
-            and content.startswith("[Compressed]")
-        ):
-            return content
-    return None
 
 
 def cmd_goal(cmd: str, ctx: CommandContext) -> bool:
@@ -881,7 +842,7 @@ def _count_output_tokens(messages: list[object]) -> int:
 
 def _count_tokens_by_message_role(messages: list[object]) -> dict[str, int]:
     """按角色拆解消息 token 用量（user / agent / tool_calls）。"""
-    from xcode.agent._compaction import estimate_tokens
+    from xcode.agent._context_window import estimate_tokens
     from xcode.agent.messages import (
         AssistantMessage,
         ToolResultMessage,
@@ -964,7 +925,7 @@ def _compute_context_summary(
     agent: object, project_root: Path, state: ReplState
 ) -> _ContextSummary:
     """计算分类 token 用量，并更新 state 供底栏使用。"""
-    from xcode.agent._compaction import estimate_tokens
+    from xcode.agent._context_window import estimate_tokens
     from xcode.coding_agent.prompting.identity import (
         CORE_IDENTITY,
     )
@@ -1532,9 +1493,9 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         accepts_args=True,
         group=COMMAND_GROUP_MODE,
     ),
-    "/compact": CommandEntry(
-        handler=cmd_compact,
-        desc="Manually request context compaction and shrink the session log.",
+    "/new-context": CommandEntry(
+        handler=cmd_new_context,
+        desc="Close the current model context and start a fresh window.",
         group=COMMAND_GROUP_SESSION_ROLLBACK,
     ),
     "/goal": CommandEntry(

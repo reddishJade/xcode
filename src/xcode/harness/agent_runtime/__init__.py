@@ -1,8 +1,8 @@
 """Agent 循环、子 Agent、提示词与上下文运行时。"""
 
 from .cancellation import CancellationToken
-from .compaction import estimate_message_tokens
 from .composition import AgentComposition
+from .context_window import estimate_message_tokens
 from .contextual import ContextualRetrievalState
 from .events import AgentHarnessEvent
 from .result import AgentHarnessResult, RunState

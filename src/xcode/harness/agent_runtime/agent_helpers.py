@@ -16,7 +16,7 @@ from ...agent.messages import AgentMessage, ToolResultMessage
 from ...agent.types import ShellCallOutputContent, TextContent
 from .async_worker import IsolatedAsyncWorker
 from .cancellation import CancellationToken
-from .compaction import (
+from .context_window import (
     budget_large_tool_outputs,
     latest_read_file_tool_result_ids,
 )
@@ -122,8 +122,8 @@ def budget_messages_for_provider(
         large_tool_output_chars=8_000,
         large_tool_output_head_chars=4_000,
         large_tool_output_tail_chars=4_000,
-        compact_token_threshold=1,
-        budget_trigger_token_ratio=0,
+        active_window_token_threshold=1,
+        tool_trim_trigger_ratio=0,
         preserve_tool_result_ids=preserved_tool_results,
     )
 

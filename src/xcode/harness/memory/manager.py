@@ -135,7 +135,7 @@ class MemoryManager:
         """按文件顺序读取可装入预算的记忆，用于 resume/rebuild。"""
         if max_tokens <= 0:
             return []
-        from xcode.agent._compaction import estimate_tokens
+        from xcode.agent._context_window import estimate_tokens
 
         selected: list[str] = []
         remaining = max_tokens

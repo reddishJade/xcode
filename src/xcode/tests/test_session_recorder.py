@@ -127,7 +127,9 @@ def test_app_records_programmatic_turn_without_stream_fragments(tmp_path: Path) 
     assert branch[3].content == "done"
 
 
-def test_compaction_appends_epoch_without_rewriting_history(tmp_path: Path) -> None:
+def test_context_reset_appends_epoch_without_rewriting_history(
+    tmp_path: Path,
+) -> None:
     recorder = _recorder(tmp_path)
     inbox = SessionInbox(recorder.store)
     inbox.insert(
@@ -137,12 +139,10 @@ def test_compaction_appends_epoch_without_rewriting_history(tmp_path: Path) -> N
     transcript = recorder.store.current_path
     original = transcript.read_bytes()
 
-    recorder.record_compaction(
-        summary="current state",
+    recorder.record_context_window_reset(
+        window_id="window-2",
         messages_before=12,
         messages_after=4,
-        tokens_before=9000,
-        tokens_after=2000,
         replacement=[UserMessage(content="current state")],
     )
 
@@ -151,8 +151,9 @@ def test_compaction_appends_epoch_without_rewriting_history(tmp_path: Path) -> N
     assert len(updated) > len(original)
     event = recorder.store.build_branch()[-1].content
     assert isinstance(event, dict)
-    assert event["type"] == "compaction"
-    assert event["data"]["summary"] == "current state"
+    assert event["type"] == "context_window_reset"
+    assert event["data"]["window_id"] == "window-2"
+    assert event["data"]["trigger"] == "manual"
     assert event["data"]["generation"] == 1
     assert len(event["data"]["surface_sha256"]) == 64
 
